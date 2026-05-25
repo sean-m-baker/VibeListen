@@ -1,0 +1,24 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE files
+.vscode/
+.idea/
+
+# Application files (local runtime data)
+data/db.sqlite
+data/audio/*.mp3
+data/audio/*.wav
+data/rss.xml
+db.sqlite
+.env
