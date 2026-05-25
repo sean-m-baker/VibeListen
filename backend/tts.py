@@ -2,9 +2,7 @@ from typing import Dict, Any
 from backend.tts_engines import get_tts_engine
 
 
-async def generate_podcast_audio(
-    text: str, title: str, author: str, output_path: str, voice: str, engine_name: str = None
-) -> Dict[str, Any]:
+async def generate_podcast_audio(text: str, title: str, author: str, output_path: str, voice: str) -> Dict[str, Any]:
     """
     Asynchronously converts article text to a high-quality speech MP3 file.
     To prevent network timeouts on long articles, it chunks the text by
