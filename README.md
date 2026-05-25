@@ -1,5 +1,6 @@
 # VibeListen
 
+> Turn your reading list into a personal podcast.
 
 ## 🎯 Goal
 
@@ -7,13 +8,11 @@
 
 ## 🚀 Current State
 
-- **Frontend**: Implemented with vanilla HTML, CSS, and JavaScript using a component‑based architecture. The home page features:
-  - Dark glass‑style navigation bar.
-  - Hero section with animated music‑wave visualisation.
-  - Responsive layout for desktop and mobile.
-- **Backend**: Basic API scaffold (Python/Flask) serving static content and placeholder endpoints for future music‑data integration.
-- **Testing**: Initial unit tests for core UI components and API health checks.
-- **CI/CD**: GitHub Actions pipeline set up for linting, testing, and automatic deployment to the staging environment.
+-  **Frontend**: Vanilla HTML/CSS/JS with responsive layout.
+- **Backend**: Flask API serving RSS feeds.
+- **Sync**: Raindrop.io integration (test token).
+- **Audio Engine**: Edge TTS for on‑the‑fly audio generation.
+- **CI/CD**: GitHub Actions linting & testing.
 
 ## 🗺️ Roadmap (Future Phases)
 
@@ -27,3 +26,13 @@
 ---
 
 *Feel free to explore the repository, raise issues, or contribute via pull requests. Together we’ll make VibeListen the go‑to destination for music lovers.*
+
+## 🔧 Installation
+```bash
+git clone https://github.com/sean-m-baker/VibeListen.git
+cd VibeListen
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+# Set environment variables
+export RAINDROP_TOKEN=your_token
+python run.py
