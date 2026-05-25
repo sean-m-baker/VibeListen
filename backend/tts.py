@@ -12,7 +12,7 @@ async def generate_podcast_audio(text: str, title: str, author: str, output_path
     """
     # Create a friendly introductory header for the podcast track
     clean_author = author if author and author.lower() != "unknown" else "an unknown author"
-    intro_text = f"Welcome to PodRead. Today we are reading: {title}, by {clean_author}."
+    intro_text = f"Welcome to VibeListen. Today we are reading: {title}, by {clean_author}."
 
     # Split original article by paragraphs to maintain speech pauses
     paragraphs = text.split("\n\n")
