@@ -1,13 +1,13 @@
 # Product Requirements Document (PRD)
-## Project: PodRead (Read-it-Later Podcast Generator)
+## Project: VibeListen (Read-it-Later Podcast Generator)
 
 ---
 
 ### 1. Executive Summary & Vision
 
-**PodRead** is a self-hosted, lightweight utility that automatically bridges the gap between text-based "read-it-later" services (such as Instapaper, Raindrop.io, and Pocket) and audio-based podcast players (such as Overcast, Pocket Casts, and Apple Podcasts). 
+**VibeListen** is a self-hosted, lightweight utility that automatically bridges the gap between text-based "read-it-later" services (such as Instapaper, Raindrop.io, and Pocket) and audio-based podcast players (such as Overcast, Pocket Casts, and Apple Podcasts). 
 
-The goal of PodRead is to convert saved text bookmarks into highly natural speech audio files and serve them via a standard, secure podcast RSS feed. This allows users to listen to their personal reading list on the go using their standard podcast app, with support for local offline-first TTS generation (using state-of-the-art models like Kyutai Labs' **Pocket TTS** and **Piper TTS**) or zero-config cloud-based options.
+The goal of VibeListen is to convert saved text bookmarks into highly natural speech audio files and serve them via a standard, secure podcast RSS feed. This allows users to listen to their personal reading list on the go using their standard podcast app, with support for local offline-first TTS generation (using state-of-the-art models like Kyutai Labs' **Pocket TTS** and **Piper TTS**) or zero-config cloud-based options.
 
 ---
 
@@ -15,8 +15,8 @@ The goal of PodRead is to convert saved text bookmarks into highly natural speec
 
 ```mermaid
 graph TD
-    A[User saves article to Instapaper / Raindrop] --> B[PodRead background syncs article]
-    B --> C[PodRead cleans & extracts article text]
+    A[User saves article to Instapaper / Raindrop] --> B[VibeListen background syncs article]
+    B --> C[VibeListen cleans & extracts article text]
     C --> D[TTS Pipeline converts text to speech]
     D --> E[Audio file compressed & stored locally]
     E --> F[Podcast RSS feed XML is updated]
@@ -34,7 +34,7 @@ graph TD
 
 ### 3. Read-it-Later Service Integrations
 
-To get articles, PodRead will support multiple services. The following table compares integrations to help the user choose their backend:
+To get articles, VibeListen will support multiple services. The following table compares integrations to help the user choose their backend:
 
 | Metric / Feature | **Instapaper** (User Choice) | **Raindrop.io** (Recommended Alternative) | **Pocket** (Alternative) |
 | :--- | :--- | :--- | :--- |
@@ -50,7 +50,7 @@ To get articles, PodRead will support multiple services. The following table com
 
 ### 4. Text-To-Speech (TTS) Engine Architecture
 
-PodRead will implement a pluggable audio synthesis system. Users can toggle between three engine tiers in their settings:
+VibeListen will implement a pluggable audio synthesis system. Users can toggle between three engine tiers in their settings:
 
 #### A. Pocket TTS (Kyutai Labs)
 *   **Type**: Offline, local neural TTS (Continuous Audio Language Models - CALM framework).
@@ -102,7 +102,7 @@ PodRead will implement a pluggable audio synthesis system. Users can toggle betw
 
 #### Feature 2: Audio Synthesis Pipeline (Backend)
 *   **Job Queue**: Processes text-to-speech tasks in a background thread to prevent blocking the UI.
-*   **Stitched Intros**: Prepends a short programmatic intro: *"Welcome to PodRead. Reading: [Title] by [Author], published in [Domain]."*
+*   **Stitched Intros**: Prepends a short programmatic intro: *"Welcome to VibeListen. Reading: [Title] by [Author], published in [Domain]."*
 *   **Format Transcoder**: Encodes the output into constant bitrate (CBR) MP3 format (96-128kbps, mono) optimal for voice podcasts to save bandwidth and storage.
 
 #### Feature 3: Podcast Feed Server
@@ -135,7 +135,7 @@ PodRead will implement a pluggable audio synthesis system. Users can toggle betw
                                       |
                                       v
 +-------------------------------------+-----------------------------------+
-|                           PodRead Backend (FastAPI)                     |
+|                           VibeListen Backend (FastAPI)                     |
 |                                                                         |
 |  +--------------------+   +---------------------+   +----------------+  |
 |  |  Bookmark Syncer   |-->|   Content Parser    |-->| SQLite DB      |  |
