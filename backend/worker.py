@@ -1,13 +1,14 @@
 import asyncio
 import logging
+import os
 import signal
 from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Session, select, update
 
-from backend.config import AUDIO_DIR, DEFAULT_VOICE
-from backend.database import engine, init_db, Bookmark
+from backend.config import AUDIO_DIR
+from backend.database import engine, init_db, Bookmark, get_setting
 from backend.parser import extract_article_content
 from backend.tts import generate_podcast_audio
 
@@ -119,6 +120,14 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
 
         # Step 2: Speech synthesis
         try:
+            # Read TTS settings from database (with env fallbacks)
+            tts_engine = get_setting(
+                session, "tts_engine", default=os.getenv("TTS_ENGINE", "edge"), section="tts"
+            )
+            tts_voice = get_setting(
+                session, "tts_voice", default=os.getenv("DEFAULT_VOICE", "en-US-GuyNeural"), section="tts"
+            )
+
             filename = f"raindrop_{bookmark.raindrop_id}.mp3"
             output_path = AUDIO_DIR / filename
 
@@ -127,7 +136,8 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 title=bookmark.title,
                 author=bookmark.author or "Unknown Author",
                 output_path=str(output_path),
-                voice=DEFAULT_VOICE,
+                voice=tts_voice,
+                engine_name=tts_engine,
             )
 
             bookmark.audio_filename = filename
@@ -137,7 +147,7 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
             bookmark.generated_at = datetime.utcnow()
             session.add(bookmark)
             session.commit()
-            logger.info(f"Worker: Completed bookmark {bookmark_id}")
+            logger.info(f"Worker: Completed bookmark {bookmark_id} (engine={tts_engine}, voice={tts_voice})")
         except Exception:
             logger.exception(f"Worker: Synthesis failed for bookmark {bookmark_id}")
             bookmark.status = "failed"

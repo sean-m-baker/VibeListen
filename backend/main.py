@@ -1,16 +1,17 @@
 import os
 import logging
-from typing import List
-from fastapi import FastAPI, Depends, HTTPException, Response
+from typing import List, Dict, Any
+from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
-from backend.config import BASE_DIR, AUDIO_DIR
-from backend.database import init_db, get_session, Bookmark
+from backend.config import BASE_DIR, AUDIO_DIR, MODELS_DIR, REFERENCE_WAV_PATH
+from backend.database import init_db, get_session, Bookmark, Setting, get_setting, set_setting
 from backend.syncer import sync_raindrops
 from backend.rss_generator import generate_podcast_rss
+from backend.tts_engines import list_available_engines
 
 # Setup server logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -95,6 +96,107 @@ def get_rss_feed(db: Session = Depends(get_session)):
     
     rss_xml = generate_podcast_rss(completed_bookmarks)
     return Response(content=rss_xml, media_type="application/xml")
+
+
+# ----------------- Settings API -----------------
+
+@app.get("/api/settings")
+def get_all_settings(db: Session = Depends(get_session)):
+    """Returns all user-configurable settings grouped by section."""
+    settings = db.exec(select(Setting)).all()
+    result: Dict[str, Dict[str, str]] = {}
+    for s in settings:
+        if s.section not in result:
+            result[s.section] = {}
+        result[s.section][s.key] = s.value
+    return result
+
+
+@app.post("/api/settings")
+def update_setting(
+    key: str = Form(...),
+    value: str = Form(...),
+    section: str = Form("general"),
+    db: Session = Depends(get_session),
+):
+    """Create or update a single setting."""
+    setting = set_setting(db, key, value, section)
+    logger.info(f"Setting updated: [{section}] {key} = {value}")
+    return {"status": "success", "section": setting.section, "key": setting.key, "value": setting.value}
+
+
+# ----------------- TTS Engine API -----------------
+
+@app.get("/api/tts/engines")
+def get_tts_engines():
+    """Lists all registered TTS engines and their installation status."""
+    return {"engines": list_available_engines()}
+
+
+@app.get("/api/tts/voices/{engine}")
+def get_voices_for_engine(engine: str):
+    """Returns available voice options for a given TTS engine."""
+    engine = engine.lower().strip()
+    if engine == "edge":
+        return {
+            "voices": [
+                {"id": "en-US-GuyNeural", "name": "Guy (US English)"},
+                {"id": "en-US-JennyNeural", "name": "Jenny (US English)"},
+                {"id": "en-GB-RyanNeural", "name": "Ryan (UK English)"},
+                {"id": "en-GB-SoniaNeural", "name": "Sonia (UK English)"},
+                {"id": "en-AU-WillNeural", "name": "Will (Australian English)"},
+                {"id": "en-CA-LiamNeural", "name": "Liam (Canadian English)"},
+            ]
+        }
+    elif engine == "piper":
+        return {
+            "voices": [
+                {"id": "en_US-lessac-medium", "name": "Lessac Medium (US English)"},
+                {"id": "en_US-ryan-high", "name": "Ryan High (US English)"},
+                {"id": "en_GB-southern_english_female-medium", "name": "Southern English Female (UK)"},
+                {"id": "en_GB-northern_english_male-medium", "name": "Northern English Male (UK)"},
+            ]
+        }
+    elif engine == "pocket":
+        return {
+            "voices": [
+                {"id": "default", "name": "Default CALM Voice"},
+                {"id": "cloned", "name": "Cloned Reference Voice"},
+            ]
+        }
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
+
+
+@app.post("/api/tts/reference")
+async def upload_reference_audio(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_session),
+):
+    """Upload a reference WAV file for voice cloning (Pocket TTS)."""
+    if not file.filename.endswith(".wav"):
+        raise HTTPException(status_code=400, detail="Only .wav files are supported for reference audio.")
+    
+    try:
+        contents = await file.read()
+        REFERENCE_WAV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(REFERENCE_WAV_PATH, "wb") as f:
+            f.write(contents)
+        
+        # Update the setting to indicate a reference is available
+        set_setting(db, "reference_audio", str(REFERENCE_WAV_PATH), section="tts")
+        
+        logger.info(f"Reference audio uploaded: {REFERENCE_WAV_PATH} ({len(contents)} bytes)")
+        return {
+            "status": "success",
+            "message": "Reference audio uploaded successfully.",
+            "path": str(REFERENCE_WAV_PATH),
+            "size": len(contents),
+        }
+    except Exception as e:
+        logger.error(f"Failed to upload reference audio: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Mount general static assets (js, css, images) under `/frontend`
 app.mount("/frontend", StaticFiles(directory=str(BASE_DIR / "frontend")), name="frontend")

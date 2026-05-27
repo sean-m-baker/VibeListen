@@ -116,18 +116,19 @@ def test_reference_validation_invalid_file(tmp_path):
 @pytest.mark.asyncio
 async def test_pocket_engine_synthesize_not_implemented(tmp_path):
     with patch("backend.tts_engines.pocket_engine.torch", MagicMock()):
-        from backend.tts_engines.pocket_engine import PocketEngine
-        engine = PocketEngine()
-        output_path = str(tmp_path / "output.mp3")
+        with patch("backend.tts_engines.pocket_engine.REFERENCE_WAV_PATH", Path("/nonexistent")):
+            from backend.tts_engines.pocket_engine import PocketEngine
+            engine = PocketEngine()
+            output_path = str(tmp_path / "output.mp3")
 
-        with pytest.raises(NotImplementedError, match="not yet fully implemented"):
-            await engine.synthesize(
-                text="Hello world.",
-                title="Test Article",
-                author="Test Author",
-                output_path=output_path,
-                voice="default",
-            )
+            with pytest.raises(NotImplementedError, match="not yet fully implemented"):
+                await engine.synthesize(
+                    text="Hello world.",
+                    title="Test Article",
+                    author="Test Author",
+                    output_path=output_path,
+                    voice="default",
+                )
 
 
 def test_reference_validation_missing_file():

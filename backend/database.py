@@ -1,5 +1,6 @@
 from typing import Optional, Generator
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, create_engine, Session
 from backend.config import SQLITE_DB_PATH
 
@@ -29,9 +30,51 @@ class Bookmark(SQLModel, table=True):
     added_at: datetime = Field(default_factory=datetime.utcnow)
     generated_at: Optional[datetime] = None
 
+
+class Setting(SQLModel, table=True):
+    """
+    Simple key-value store for user-configurable application settings.
+    Primary keys are scoped by section and key.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    section: str = Field(default="general", index=True, nullable=False)
+    key: str = Field(nullable=False)
+    value: str = Field(default="", nullable=False)
+    
+    # Ensure unique constraint on section + key
+    __table_args__ = (UniqueConstraint("section", "key"),)
+
+
+def get_setting(db: Session, key: str, default: str = "", section: str = "general") -> str:
+    """Fetch a setting value by key, returning a default if not found."""
+    from sqlalchemy import select
+    statement = select(Setting).where(Setting.section == section, Setting.key == key)
+    result = db.exec(statement).scalars().first()
+    return result.value if result else default
+
+
+def set_setting(db: Session, key: str, value: str, section: str = "general") -> Setting:
+    """Upsert a setting value by key."""
+    from sqlalchemy import select
+    statement = select(Setting).where(Setting.section == section, Setting.key == key)
+    existing = db.exec(statement).scalars().first()
+    if existing:
+        existing.value = value
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    new_setting = Setting(section=section, key=key, value=value)
+    db.add(new_setting)
+    db.commit()
+    db.refresh(new_setting)
+    return new_setting
+
+
 def init_db() -> None:
     """Creates the SQLite database and all defined tables."""
     SQLModel.metadata.create_all(engine)
+
 
 def get_session() -> Generator[Session, None, None]:
     """Dependency injector yielding a database session context."""

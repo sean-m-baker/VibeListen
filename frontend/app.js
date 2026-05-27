@@ -420,6 +420,146 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ----------------- Settings Modal -----------------
+
+    const btnSettings = document.getElementById("btn-settings");
+    const modalSettings = document.getElementById("modal-settings");
+    const btnSettingsClose = document.getElementById("btn-settings-close");
+    const settingEngine = document.getElementById("setting-engine");
+    const settingVoice = document.getElementById("setting-voice");
+    const settingReference = document.getElementById("setting-reference");
+    const referenceFilename = document.getElementById("reference-filename");
+    const btnSaveSettings = document.getElementById("btn-save-settings");
+
+    // Track the currently selected file for upload
+    let pendingReferenceFile = null;
+
+    async function loadSettings() {
+        try {
+            const response = await fetch("/api/settings");
+            if (!response.ok) return;
+            const settings = await response.json();
+            const ttsSettings = settings.tts || {};
+
+            if (ttsSettings.tts_engine) {
+                settingEngine.value = ttsSettings.tts_engine;
+                await populateVoices(ttsSettings.tts_engine);
+            }
+            if (ttsSettings.tts_voice) {
+                settingVoice.value = ttsSettings.tts_voice;
+            }
+        } catch (error) {
+            console.error("Failed to load settings:", error);
+        }
+    }
+
+    async function populateVoices(engine) {
+        try {
+            const response = await fetch(`/api/tts/voices/${engine}`);
+            if (!response.ok) throw new Error("Failed to fetch voices");
+            const data = await response.json();
+
+            settingVoice.innerHTML = '<option value="">-- Select a voice --</option>';
+            data.voices.forEach(voice => {
+                const option = document.createElement("option");
+                option.value = voice.id;
+                option.textContent = voice.name;
+                settingVoice.appendChild(option);
+            });
+        } catch (error) {
+            console.error("Error loading voices:", error);
+            settingVoice.innerHTML = '<option value="">-- No voices available --</option>';
+        }
+    }
+
+    btnSettings.addEventListener("click", () => {
+        modalSettings.classList.remove("hidden");
+        loadSettings();
+    });
+
+    btnSettingsClose.addEventListener("click", () => {
+        modalSettings.classList.add("hidden");
+    });
+
+    modalSettings.addEventListener("click", (e) => {
+        if (e.target === modalSettings) modalSettings.classList.add("hidden");
+    });
+
+    settingEngine.addEventListener("change", async () => {
+        const engine = settingEngine.value;
+        await populateVoices(engine);
+        // Show/hide reference upload based on engine
+        const groupRef = document.getElementById("group-reference");
+        groupRef.style.display = engine === "pocket" ? "block" : "none";
+    });
+
+    settingReference.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            pendingReferenceFile = file;
+            referenceFilename.textContent = file.name;
+        }
+    });
+
+    btnSaveSettings.addEventListener("click", async () => {
+        const engine = settingEngine.value;
+        const voice = settingVoice.value;
+
+        if (!voice) {
+            showToast("❌ Please select a voice.", "error");
+            return;
+        }
+
+        btnSaveSettings.disabled = true;
+        btnSaveSettings.textContent = "Saving...";
+
+        try {
+            // Save engine
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "tts_engine",
+                    value: engine,
+                    section: "tts"
+                })
+            });
+
+            // Save voice
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "tts_voice",
+                    value: voice,
+                    section: "tts"
+                })
+            });
+
+            // Upload reference audio if selected
+            if (pendingReferenceFile && engine === "pocket") {
+                const formData = new FormData();
+                formData.append("file", pendingReferenceFile);
+                const uploadResponse = await fetch("/api/tts/reference", {
+                    method: "POST",
+                    body: formData
+                });
+                if (!uploadResponse.ok) throw new Error("Reference upload failed");
+                pendingReferenceFile = null;
+                referenceFilename.textContent = "";
+            }
+
+            showToast("✅ Settings saved! They will take effect on the next synthesis.", "success");
+            modalSettings.classList.add("hidden");
+        } catch (error) {
+            console.error("Save settings error:", error);
+            showToast("❌ Failed to save settings.", "error");
+        } finally {
+            btnSaveSettings.disabled = false;
+            btnSaveSettings.textContent = "Save Settings";
+        }
+    });
+
     // Initialize Application
     fetchBookmarks();
 });
