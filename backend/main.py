@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +18,21 @@ from backend.tts_engines import list_available_engines
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("PodRead")
 
-app = FastAPI(title="PodRead", description="Personal Read-it-Later Podcast Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialized successfully.")
+    
+    # Ensure frontend directories are ready
+    os.makedirs(BASE_DIR / "frontend", exist_ok=True)
+    yield
+
+app = FastAPI(
+    title="PodRead",
+    description="Personal Read-it-Later Podcast Server",
+    lifespan=lifespan
+)
 
 # Configure CORS so dashboard can easily communicate with API from any client host
 app.add_middleware(
@@ -27,16 +42,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize SQLite database on boot
-@app.on_event("startup")
-def on_startup():
-    logger.info("Initializing database...")
-    init_db()
-    logger.info("Database initialized successfully.")
-    
-    # Ensure frontend directories are ready
-    os.makedirs(BASE_DIR / "frontend", exist_ok=True)
 
 # ----------------- Static File Routing -----------------
 

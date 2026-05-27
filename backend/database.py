@@ -1,5 +1,5 @@
 from typing import Optional, Generator
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, create_engine, Session
 from backend.config import SQLITE_DB_PATH
@@ -27,7 +27,7 @@ class Bookmark(SQLModel, table=True):
     audio_duration: Optional[float] = None  # Duration in seconds
     audio_filesize: Optional[int] = None    # Size in bytes
     status: str = Field(default="pending")  # pending, parsing, parsing_failed, synthesizing, completed, failed
-    added_at: datetime = Field(default_factory=datetime.utcnow)
+    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     generated_at: Optional[datetime] = None
 
 

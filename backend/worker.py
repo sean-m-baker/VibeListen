@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import signal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Session, select, update
@@ -144,7 +144,7 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
             bookmark.audio_filesize = stats["filesize"]
             bookmark.audio_duration = stats["duration"]
             bookmark.status = "completed"
-            bookmark.generated_at = datetime.utcnow()
+            bookmark.generated_at = datetime.now(timezone.utc)
             session.add(bookmark)
             session.commit()
             logger.info(f"Worker: Completed bookmark {bookmark_id} (engine={tts_engine}, voice={tts_voice})")
