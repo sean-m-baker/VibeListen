@@ -4,7 +4,7 @@ from typing import Optional, Type
 from backend.config import TTS_ENGINE
 from backend.tts_engines.base import BaseTTSEngine
 
-logger = logging.getLogger("PodRead.TTS.Factory")
+logger = logging.getLogger("VibeListen.TTS.Factory")
 
 
 # ============================================================================

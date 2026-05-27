@@ -6,7 +6,7 @@ from backend.config import RAINDROP_TOKEN
 from backend.database import Bookmark
 
 # Configure logger for the syncer module
-logger = logging.getLogger("PodRead.Syncer")
+logger = logging.getLogger("VibeListen.Syncer")
 
 # Raindrop API base endpoints
 RAINDROP_API_URL = "https://api.raindrop.io/rest/v1/raindrops/0"

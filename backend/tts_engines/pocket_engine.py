@@ -8,7 +8,7 @@ from pathlib import Path
 from backend.tts_engines.base import BaseTTSEngine
 from backend.config import MODELS_DIR, REFERENCE_WAV_PATH
 
-logger = logging.getLogger("PodRead.PocketEngine")
+logger = logging.getLogger("VibeListen.PocketEngine")
 
 # Optional heavy dependencies - gracefully handled
 try:
@@ -157,7 +157,7 @@ class PocketEngine(BaseTTSEngine):
             author if author and author.lower() != "unknown" else "an unknown author"
         )
         intro_text = (
-            f"Welcome to PodRead. Today we are reading: {title}, by {clean_author}."
+            f"Welcome to VibeListen. Today we are reading: {title}, by {clean_author}."
         )
         full_text = f"{intro_text}\n\n{text}"
 

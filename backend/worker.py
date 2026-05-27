@@ -12,7 +12,7 @@ from backend.database import engine, init_db, Bookmark, get_setting
 from backend.parser import extract_article_content
 from backend.tts import generate_podcast_audio
 
-logger = logging.getLogger("PodRead.Worker")
+logger = logging.getLogger("VibeListen.Worker")
 
 _shutdown_requested = False
 

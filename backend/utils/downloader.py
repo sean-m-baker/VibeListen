@@ -4,7 +4,7 @@ import requests
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("PodRead.Downloader")
+logger = logging.getLogger("VibeListen.Downloader")
 
 # Default HuggingFace repository for Piper voices
 PIPER_VOICES_BASE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PodRead Launcher
+VibeListen Launcher
 ================
 Starts both the FastAPI web server and the background worker in parallel,
 with cross-platform graceful shutdown on Ctrl+C or SIGTERM.
@@ -54,7 +54,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
-    print("[Launcher] Starting PodRead server and worker...")
+    print("[Launcher] Starting VibeListen server and worker...")
     print(f"[Launcher] Project root: {PROJECT_ROOT}")
 
     # Ensure Python imports resolve from the project root

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PodRead Launcher (Unix)
+# VibeListen Launcher (Unix)
 # Starts the FastAPI web server and background worker in parallel.
 #
 # Usage:
@@ -29,7 +29,7 @@ cleanup() {
 
 trap cleanup INT TERM
 
-echo "[Launcher] Starting PodRead server and worker..."
+echo "[Launcher] Starting VibeListen server and worker..."
 echo "[Launcher] Project root: $SCRIPT_DIR"
 
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &

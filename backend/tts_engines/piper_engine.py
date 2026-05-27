@@ -9,7 +9,7 @@ from backend.tts_engines.base import BaseTTSEngine
 from backend.config import MODELS_DIR
 from backend.utils.downloader import ensure_piper_voice
 
-logger = logging.getLogger("PodRead.PiperEngine")
+logger = logging.getLogger("VibeListen.PiperEngine")
 
 # Optional heavy dependency - imported lazily inside methods
 try:
@@ -71,7 +71,7 @@ class PiperEngine(BaseTTSEngine):
             author if author and author.lower() != "unknown" else "an unknown author"
         )
         intro_text = (
-            f"Welcome to PodRead. Today we are reading: {title}, by {clean_author}."
+            f"Welcome to VibeListen. Today we are reading: {title}, by {clean_author}."
         )
         full_text = f"{intro_text}\n\n{text}"
 

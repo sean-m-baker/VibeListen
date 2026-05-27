@@ -1,5 +1,5 @@
 /* ==========================================================================
-   PodRead Frontend - State Management & API Connections
+   VibeListen Frontend - State Management & API Connections
    ========================================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {

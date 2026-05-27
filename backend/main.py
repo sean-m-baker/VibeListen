@@ -16,7 +16,7 @@ from backend.tts_engines import list_available_engines
 
 # Setup server logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("PodRead")
+logger = logging.getLogger("VibeListen")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="PodRead",
+    title="VibeListen",
     description="Personal Read-it-Later Podcast Server",
     lifespan=lifespan
 )
@@ -50,7 +50,7 @@ app.add_middleware(
 def read_root():
     index_path = BASE_DIR / "frontend" / "index.html"
     if not os.path.exists(index_path):
-        return {"message": "Welcome to PodRead API! Dashboard index.html is not created yet."}
+        return {"message": "Welcome to VibeListen API! Dashboard index.html is not created yet."}
     return FileResponse(index_path)
 
 # Mount audio storage directory under `/audio` to serve synthesized MP3 enclosures
