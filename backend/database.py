@@ -1,5 +1,9 @@
 from typing import Optional, Generator
+<<<<<<< HEAD
 from datetime import datetime, timezone
+=======
+from datetime import datetime
+>>>>>>> df01a4e (feat: add database-backed application settings and TTS engine/voice configuration support)
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, create_engine, Session
 from backend.config import SQLITE_DB_PATH
