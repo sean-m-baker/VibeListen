@@ -19,7 +19,21 @@ from backend.tts_engines import list_available_engines
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("VibeListen")
 
-app = FastAPI(title="VibeListen", description="Personal Read-it-Later Podcast Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialized successfully.")
+    
+    # Ensure frontend directories are ready
+    os.makedirs(BASE_DIR / "frontend", exist_ok=True)
+    yield
+
+app = FastAPI(
+    title="VibeListen",
+    description="Personal Read-it-Later Podcast Server",
+    lifespan=lifespan
+)
 
 # Configure CORS so dashboard can easily communicate with API from any client host
 app.add_middleware(
