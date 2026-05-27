@@ -18,7 +18,7 @@ from backend.tts_engines import list_available_engines
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("VibeListen")
 
-app = FastAPI(title="VibeListen", description="Personal Read-it-Later Podcast Server")
+app = FastAPI(title="PodRead", description="Personal Read-it-Later Podcast Server")
 
 # Configure CORS so dashboard can easily communicate with API from any client host
 app.add_middleware(
