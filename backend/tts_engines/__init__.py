@@ -20,7 +20,7 @@ def _build_edge_engine() -> Type[BaseTTSEngine]:
 
 def _build_piper_engine() -> Type[BaseTTSEngine]:
     try:
-        import piper_tts  # noqa: F401 – verify package is available
+        from piper import PiperVoice  # noqa: F401 – verify package is available
     except ImportError as exc:
         raise RuntimeError(
             "Piper TTS is not installed. Install Piper deps: "
