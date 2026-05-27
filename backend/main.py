@@ -1,18 +1,15 @@
 import os
 import logging
 from typing import List
-from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Response
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
-from backend.config import BASE_DIR, AUDIO_DIR, DEFAULT_VOICE
+from backend.config import BASE_DIR, AUDIO_DIR
 from backend.database import init_db, get_session, Bookmark
 from backend.syncer import sync_raindrops
-from backend.parser import extract_article_content
-from backend.tts import generate_podcast_audio
 from backend.rss_generator import generate_podcast_rss
 
 # Setup server logger
@@ -53,72 +50,6 @@ def read_root():
 # Mount audio storage directory under `/audio` to serve synthesized MP3 enclosures
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 
-# ----------------- Background Worker Tasks -----------------
-
-async def process_bookmark_pipeline(bookmark_id: int, db: Session):
-    """
-    Background worker that runs the full bookmark processing pipeline:
-    1. Parses & cleans HTML text from the URL
-    2. Runs Edge TTS to generate the podcast track
-    3. Saves final metadata & completes status
-    """
-    # Fetch bookmark inside worker context
-    bookmark = db.get(Bookmark, bookmark_id)
-    if not bookmark:
-        logger.error(f"Worker Pipeline failed: Bookmark ID {bookmark_id} not found.")
-        return
-
-    logger.info(f"Starting pipeline for bookmark {bookmark_id}: '{bookmark.title}'")
-    
-    # Step 1: Parse content
-    try:
-        bookmark.status = "parsing"
-        db.add(bookmark)
-        db.commit()
-        
-        clean_text = extract_article_content(bookmark.url)
-        
-        # Save text and update status
-        bookmark.clean_text = clean_text
-        bookmark.status = "synthesizing"
-        db.add(bookmark)
-        db.commit()
-    except Exception as e:
-        logger.exception(f"Parsing failed for bookmark {bookmark_id}")
-        bookmark.status = "parsing_failed"
-        db.add(bookmark)
-        db.commit()
-        return
-
-    # Step 2: Speech synthesis
-    try:
-        filename = f"raindrop_{bookmark.raindrop_id}.mp3"
-        output_path = AUDIO_DIR / filename
-        
-        # Async execution of Edge-TTS synthesizer
-        stats = await generate_podcast_audio(
-            text=bookmark.clean_text,
-            title=bookmark.title,
-            author=bookmark.author or "Unknown Author",
-            output_path=str(output_path),
-            voice=DEFAULT_VOICE
-        )
-        
-        # Update database with success state
-        bookmark.audio_filename = filename
-        bookmark.audio_filesize = stats["filesize"]
-        bookmark.audio_duration = stats["duration"]
-        bookmark.status = "completed"
-        bookmark.generated_at = datetime.utcnow()
-        db.add(bookmark)
-        db.commit()
-        logger.info(f"Pipeline completed successfully for bookmark {bookmark_id}")
-    except Exception as e:
-        logger.exception(f"Synthesis failed for bookmark {bookmark_id}")
-        bookmark.status = "failed"
-        db.add(bookmark)
-        db.commit()
-
 # ----------------- API Endpoints -----------------
 
 @app.get("/api/bookmarks", response_model=List[Bookmark])
@@ -128,7 +59,7 @@ def list_bookmarks(db: Session = Depends(get_session)):
     return db.exec(statement).all()
 
 @app.post("/api/sync")
-def trigger_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_session)):
+def trigger_sync(db: Session = Depends(get_session)):
     """Triggers synchronizing newest bookmarks from Raindrop.io as a background worker task."""
     try:
         new_count = sync_raindrops(db)
@@ -140,26 +71,21 @@ def trigger_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_se
 @app.post("/api/generate/{bookmark_id}")
 def trigger_generation(
     bookmark_id: int, 
-    background_tasks: BackgroundTasks, 
     db: Session = Depends(get_session)
 ):
-    """Adds article cleaning and audio synthesis for a bookmark into the background thread pool queue."""
+    """Queue a bookmark for processing by the standalone background worker."""
     bookmark = db.get(Bookmark, bookmark_id)
     if not bookmark:
         raise HTTPException(status_code=404, detail="Bookmark not found")
         
-    if bookmark.status in ["parsing", "synthesizing"]:
-        return {"status": "already_running", "message": "Synthesis pipeline is already executing."}
+    if bookmark.status in ["queued", "processing", "parsing", "synthesizing"]:
+        return {"status": "already_running", "message": "Bookmark is already in queue or being processed."}
         
-    # Queue task to FastAPI worker pool
-    background_tasks.add_task(process_bookmark_pipeline, bookmark_id, db)
-    
-    # Mark in DB that task is queued
     bookmark.status = "queued"
     db.add(bookmark)
     db.commit()
     
-    return {"status": "queued", "message": "Bookmark added to compilation background queue."}
+    return {"status": "queued", "message": "Bookmark added to worker queue."}
 
 @app.get("/rss.xml")
 def get_rss_feed(db: Session = Depends(get_session)):
