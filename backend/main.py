@@ -17,9 +17,9 @@ from backend.rss_generator import generate_podcast_rss
 
 # Setup server logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("PodRead")
+logger = logging.getLogger("VibeListen")
 
-app = FastAPI(title="PodRead", description="Personal Read-it-Later Podcast Server")
+app = FastAPI(title="VibeListen", description="Personal Read-it-Later Podcast Server")
 
 # Configure CORS so dashboard can easily communicate with API from any client host
 app.add_middleware(
@@ -47,7 +47,7 @@ def on_startup():
 def read_root():
     index_path = BASE_DIR / "frontend" / "index.html"
     if not os.path.exists(index_path):
-        return {"message": "Welcome to PodRead API! Dashboard index.html is not created yet."}
+        return {"message": "Welcome to VibeListen API! Dashboard index.html is not created yet."}
     return FileResponse(index_path)
 
 # Mount audio storage directory under `/audio` to serve synthesized MP3 enclosures

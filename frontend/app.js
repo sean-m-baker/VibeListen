@@ -1,5 +1,5 @@
 /* ==========================================================================
-   PodRead Frontend - State Management & API Connections
+   VibeListen Frontend - State Management & API Connections
    ========================================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -152,18 +152,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderBookmarks() {
         bookmarksGrid.innerHTML = "";
-        
+
         // Sync active state across tab buttons and stats cards
         updateFilterUI();
-        
+
         // Filter bookmarks by Search & Tab Status
         const filtered = bookmarks.filter(b => {
             // Search Query
-            const matchesSearch = 
+            const matchesSearch =
                 b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (b.author && b.author.toLowerCase().includes(searchQuery.toLowerCase())) ||
                 b.domain.toLowerCase().includes(searchQuery.toLowerCase());
-                
+
             if (!matchesSearch) return false;
 
             // Tab Filter
@@ -186,7 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
         filtered.forEach(b => {
             const card = document.createElement("div");
             card.className = `glass-panel bookmark-card status-${b.status}`;
-            
+
             // Format publication/added date
             const dateObj = new Date(b.added_at);
             const dateStr = dateObj.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -204,7 +204,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span>Listen Now</span>
                     </button>
                 `;
-                
+
                 // Format estimated duration
                 const durationMin = Math.round(b.audio_duration / 60);
                 durationHtml = `
@@ -217,7 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 let text = "Compiling";
                 if (b.status === "parsing") text = "Parsing Content";
                 if (b.status === "synthesizing") text = "Synthesizing Speech";
-                
+
                 badgeHtml = `<span class="badge badge-active">${text}</span>`;
                 actionBtnHtml = `
                     <button class="btn-card" disabled>
@@ -228,7 +228,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 const label = b.status === "parsing_failed" ? "Parsing Failed" : (b.status === "failed" ? "Speech Failed" : "Unprocessed");
                 const badgeClass = b.status.includes("failed") ? "badge-error" : "badge-pending";
-                
+
                 badgeHtml = `<span class="badge ${badgeClass}">${label}</span>`;
                 actionBtnHtml = `
                     <button class="btn btn-card btn-generate" data-id="${b.id}">
@@ -255,7 +255,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 </div>
             `;
-            
+
             bookmarksGrid.appendChild(card);
         });
 
@@ -316,7 +316,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function checkAndSetupPolling() {
         // Look for any active background jobs
-        const hasActiveJobs = bookmarks.some(b => 
+        const hasActiveJobs = bookmarks.some(b =>
             ["queued", "parsing", "synthesizing"].includes(b.status)
         );
 
@@ -341,11 +341,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function showToast(message, type = "info") {
         const toast = document.createElement("div");
         toast.className = `toast toast-${type}`;
-        
+
         let icon = "🔔";
         if (type === "success") icon = "✅";
         if (type === "error") icon = "❌";
-        
+
         toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
         toastContainer.appendChild(toast);
 
@@ -427,7 +427,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // Helper: Escape HTML strings to secure against XSS injections
 function escapeHTML(str) {
     if (!str) return "";
-    return str.replace(/[&<>'"]/g, 
+    return str.replace(/[&<>'"]/g,
         tag => ({
             "&": "&amp;",
             "<": "&lt;",

@@ -29,15 +29,15 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
         '     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" ',
         '     xmlns:content="http://purl.org/rss/1.0/modules/content/">',
         '  <channel>',
-        f'    <title>{escape("PodRead Feed")}</title>',
+        f'    <title>{escape("VibeListen Feed")}</title>',
         f'    <link>{base_url_escaped}</link>',
         '    <language>en-us</language>',
-        f'    <itunes:author>{escape("PodRead Utility")}</itunes:author>',
+        f'    <itunes:author>{escape("VibeListen Utility")}</itunes:author>',
         f'    <itunes:summary>{escape("Your personalized read-it-later podcast feed, powered by local synthesis.")}</itunes:summary>',
         f'    <description>{escape("Convert articles and bookmarks from Raindrop and Instapaper to speech.")}</description>',
         '    <itunes:owner>',
-        f'      <itunes:name>{escape("PodRead User")}</itunes:name>',
-        f'      <itunes:email>{escape("user@podread.local")}</itunes:email>',
+        f'      <itunes:name>{escape("VibeListen User")}</itunes:name>',
+        f'      <itunes:email>{escape("user@VibeListen.local")}</itunes:email>',
         '    </itunes:owner>',
         '    <itunes:explicit>no</itunes:explicit>',
         '    <itunes:category text="Technology"/>',
@@ -70,7 +70,7 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
         xml.append(f'      <description>{escape(short_summary)}</description>')
         xml.append(f'      <pubDate>{pub_date}</pubDate>')
         xml.append(f'      <enclosure url="{audio_url_escaped}" type="audio/mpeg" length="{filesize}" />')
-        xml.append(f'      <guid isPermaLink="false">podread_{item.raindrop_id}</guid>')
+        xml.append(f'      <guid isPermaLink="false">VibeListen_{item.raindrop_id}</guid>')
         xml.append(f'      <itunes:duration>{duration_str}</itunes:duration>')
         xml.append('      <itunes:explicit>no</itunes:explicit>')
         xml.append('    </item>')
