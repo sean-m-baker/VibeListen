@@ -468,7 +468,17 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         } catch (error) {
             console.error("Error loading voices:", error);
-            settingVoice.innerHTML = '<option value="">-- No voices available --</option>';
+            if (engine === "edge") {
+                settingVoice.innerHTML = `
+                    <option value="">-- Select a voice --</option>
+                    <option value="en-US-AvaNeural">Ava (US English - Recommended)</option>
+                    <option value="en-US-GuyNeural">Guy (US English)</option>
+                    <option value="en-US-JennyNeural">Jenny (US English)</option>
+                    <option value="en-GB-RyanNeural">Ryan (UK English)</option>
+                `;
+            } else {
+                settingVoice.innerHTML = '<option value="">-- No voices available --</option>';
+            }
         }
     }
 
