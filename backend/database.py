@@ -1,13 +1,5 @@
 from typing import Optional, Generator
-<<<<<<< HEAD
-<<<<<<< HEAD
 from datetime import datetime, timezone
-=======
-from datetime import datetime
->>>>>>> df01a4e (feat: add database-backed application settings and TTS engine/voice configuration support)
-=======
-from datetime import datetime, timezone
->>>>>>> 22467f8 (refactor: migrate to lifespan startup pattern and update timezone-aware datetime usage)
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, create_engine, Session
 from backend.config import SQLITE_DB_PATH

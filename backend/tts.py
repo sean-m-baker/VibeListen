@@ -1,3 +1,5 @@
+import os
+import edge_tts
 from typing import Dict, Any
 from backend.tts_engines import get_tts_engine
 
