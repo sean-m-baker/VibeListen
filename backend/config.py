@@ -12,14 +12,20 @@ load_dotenv(BASE_DIR / ".env")
 RAINDROP_TOKEN = os.getenv("RAINDROP_TOKEN", "")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 
-# Speech Settings
+# Speech & TTS Engine Settings
+TTS_ENGINE = os.getenv("TTS_ENGINE", "edge").strip().lower()
 DEFAULT_VOICE = os.getenv("DEFAULT_VOICE", "en-US-GuyNeural")
 
 # Storage Directories & Files
 DATA_DIR = BASE_DIR / "data"
 SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", DATA_DIR / "db.sqlite"))
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", DATA_DIR / "audio"))
+MODELS_DIR = Path(os.getenv("MODELS_DIR", DATA_DIR / "models"))
+
+# Voice Cloning reference path (global 5-second WAV for Pocket TTS / others)
+REFERENCE_WAV_PATH = Path(os.getenv("REFERENCE_WAV_PATH", MODELS_DIR / "reference.wav"))
 
 # Ensure dynamic storage folders exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
+os.makedirs(MODELS_DIR, exist_ok=True)

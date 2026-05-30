@@ -1,6 +1,6 @@
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Session, select
 from backend.config import RAINDROP_TOKEN
 from backend.database import Bookmark
@@ -87,7 +87,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
                 cleaned_t = cleaned_t.split(".")[0]
             added_at = datetime.fromisoformat(cleaned_t)
         except Exception:
-            added_at = datetime.utcnow()
+            added_at = datetime.now(timezone.utc)
 
         # Create new bookmark entry
         new_bookmark = Bookmark(

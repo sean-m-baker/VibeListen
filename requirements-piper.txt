@@ -1,0 +1,6 @@
+# Piper TTS dependencies (offline, ONNX-based, CPU-optimized)
+# Install with:
+#   pip install -r requirements-piper.txt
+
+piper-tts>=1.2.0
+onnxruntime>=1.15.0

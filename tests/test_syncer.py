@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from backend.database import Bookmark
 from backend.syncer import sync_raindrops
 
@@ -47,7 +47,7 @@ def test_sync_raindrops_successful_import(mock_get, session):
     assert new_bookmarks_count == 2
     
     # Query database and verify fields were parsed and saved correctly
-    bookmarks = session.query(Bookmark).all()
+    bookmarks = session.exec(select(Bookmark)).all()
     assert len(bookmarks) == 2
     
     # Assert details of first bookmark

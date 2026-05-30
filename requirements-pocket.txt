@@ -1,0 +1,7 @@
+# Kyutai Pocket TTS (CALM) dependencies (offline, PyTorch-based, voice cloning)
+# Install with:
+#   pip install -r requirements-pocket.txt
+
+numpy>=1.24.0
+torch>=2.0.0
+torchaudio>=2.0.0

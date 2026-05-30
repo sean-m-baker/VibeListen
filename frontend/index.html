@@ -49,6 +49,9 @@
                     </svg>
                     <span>Podcast RSS</span>
                 </button>
+                <button id="btn-settings" class="btn btn-icon" title="Settings">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
             </div>
         </header>
 
@@ -143,6 +146,52 @@
                         <li><strong>ngrok</strong>: Run <code>ngrok http 8000</code> and replace the host above with
                             your public ngrok URL.</li>
                     </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal-overlay hidden">
+        <div class="glass-panel modal-content">
+            <div class="modal-header">
+                <h2>Speech Settings</h2>
+                <button id="btn-settings-close" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <label for="setting-engine">TTS Engine</label>
+                    <select id="setting-engine" class="settings-select">
+                        <option value="edge">Microsoft Edge TTS (Cloud)</option>
+                        <option value="piper">Piper TTS (Local ONNX)</option>
+                        <option value="pocket">Pocket TTS (Local Neural + Cloning)</option>
+                    </select>
+                    <p class="setting-hint">Select the speech synthesis backend. Edge requires internet; Piper and Pocket run offline.</p>
+                </div>
+
+                <div class="settings-group">
+                    <label for="setting-voice">Voice</label>
+                    <select id="setting-voice" class="settings-select">
+                        <option value="">-- Select a voice --</option>
+                    </select>
+                    <p class="setting-hint">Choose a voice for your podcast narrator.</p>
+                </div>
+
+                <div class="settings-group" id="group-reference">
+                    <label for="setting-reference">Reference Voice (Cloning)</label>
+                    <div class="file-upload-zone">
+                        <input type="file" id="setting-reference" accept="audio/wav,.wav" hidden>
+                        <label for="setting-reference" class="btn btn-secondary btn-upload">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                            <span>Upload 5s WAV</span>
+                        </label>
+                        <span id="reference-filename" class="file-name"></span>
+                    </div>
+                    <p class="setting-hint">Upload a 5-second, 24kHz mono WAV file to clone a custom voice (Pocket TTS only).</p>
+                </div>
+
+                <div class="settings-actions">
+                    <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
                 </div>
             </div>
         </div>

@@ -1,0 +1,11 @@
+# Convenience install for ALL local TTS dependencies
+# Optionally install engines individually for a lighter footprint:
+#   pip install -r requirements-piper.txt   # Piper only  (~50 MB ONNX)
+#   pip install -r requirements-pocket.txt  # Pocket only (~2 GB PyTorch)
+
+-r requirements-piper.txt
+-r requirements-pocket.txt
+
+# Shared audio processing enhancements
+pydub>=0.25.1
+ffmpeg-python>=0.2.0
