@@ -6,9 +6,12 @@ Starts both the FastAPI web server and the background worker in parallel,
 with cross-platform graceful shutdown on Ctrl+C or SIGTERM.
 
 Usage:
-    python start.py
+    python start.py                    # default port 8000
+    python start.py --port 8001        # custom port
+    PORT=8001 python start.py          # or via env var
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -16,14 +19,27 @@ import signal
 import time
 from pathlib import Path
 
+parser = argparse.ArgumentParser(description="VibeListen Launcher")
+parser.add_argument(
+    "--port", "-p", type=int, default=int(os.getenv("PORT", "8000")),
+    help="Port for the web server (default: 8000, env: PORT)",
+)
+args = parser.parse_args()
+
+PORT = args.port
+
 # Determine the project root (directory containing this script)
 PROJECT_ROOT = Path(__file__).resolve().parent
 
+# Auto-detect virtual environment Python (prefer .venv over system Python)
+VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+_PYTHON = sys.executable if not VENV_PYTHON.exists() else str(VENV_PYTHON)
+
 SERVER_CMD = [
-    sys.executable, "-m", "uvicorn", "backend.main:app",
-    "--host", "0.0.0.0", "--port", "8000",
+    _PYTHON, "-m", "uvicorn", "backend.main:app",
+    "--host", "0.0.0.0", "--port", str(PORT),
 ]
-WORKER_CMD = [sys.executable, "backend/worker.py"]
+WORKER_CMD = [_PYTHON, "backend/worker.py"]
 
 processes = []
 
@@ -54,7 +70,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
-    print("[Launcher] Starting VibeListen server and worker...")
+    print(f"[Launcher] Starting VibeListen server and worker on port {PORT}...")
     print(f"[Launcher] Project root: {PROJECT_ROOT}")
 
     # Ensure Python imports resolve from the project root

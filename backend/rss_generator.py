@@ -61,6 +61,9 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
         duration_sec = item.audio_duration or 0.0
         duration_str = format_duration(duration_sec)
 
+        # Determine MIME type from file extension
+        mime_type = "audio/wav" if item.audio_filename and item.audio_filename.endswith(".wav") else "audio/mpeg"
+
         # Truncate summary if too long for standard XML RSS descriptions
         short_summary = item.clean_text[:400] + "..." if item.clean_text and len(item.clean_text) > 400 else (item.clean_text or "")
         
@@ -69,7 +72,7 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
         xml.append(f'      <itunes:author>{escape(item.author or "Unknown Author")}</itunes:author>')
         xml.append(f'      <description>{escape(short_summary)}</description>')
         xml.append(f'      <pubDate>{pub_date}</pubDate>')
-        xml.append(f'      <enclosure url="{audio_url_escaped}" type="audio/mpeg" length="{filesize}" />')
+        xml.append(f'      <enclosure url="{audio_url_escaped}" type="{mime_type}" length="{filesize}" />')
         xml.append(f'      <guid isPermaLink="false">VibeListen_{item.raindrop_id}</guid>')
         xml.append(f'      <itunes:duration>{duration_str}</itunes:duration>')
         xml.append('      <itunes:explicit>no</itunes:explicit>')

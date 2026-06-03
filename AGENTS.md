@@ -7,12 +7,15 @@
 - **Data**: Storage directory (`/data/`) for audio files and database
 
 ## Key Commands
-- **Start server & worker**: `python start.py` (runs both processes)
+- **Start server & worker**: `python start.py` (runs both processes, auto-detects `.venv/`)
+- **Start server & worker (custom port)**: `python start.py --port 8001` or `PORT=8001 python start.py`
 - **Start server only**: `uvicorn backend.main:app --host 0.0.0.0 --port 8000`
 - **Start worker only**: `python backend/worker.py`
 - **Run tests**: `python -m pytest` (from project root)
 - **Install dependencies**: `pip install -r requirements.txt`
 - **Install local TTS engines**: `pip install -r requirements-local.txt`
+- **Install Piper TTS**: `pip install -r requirements-piper.txt` (if available)
+- **Install Pocket TTS**: `pip install -r requirements-pocket.txt` (if available)
 
 ## Development Workflow
 1. Modify code in `/backend` or `/frontend`
@@ -27,7 +30,7 @@
   - Launcher: `start.py` (starts both server and worker)
 - **Database**: SQLite via SQLModel (`backend/database.py`)
 - **TTS Engines**: Pluggable system in `/backend/tts_engines/` (edge, piper, pocket)
-- **Services**: Integration adapters in backend/ (syncer.py, pocket.py, etc.)
+- **Services**: Integration adapters in backend/ (syncer.py for Raindrop.io and Instapaper)
 
 ## Testing Conventions
 - Tests use pytest with asyncio support
@@ -48,12 +51,14 @@
   - `REFERENCE_WAV_PATH` (for voice cloning reference audio)
 - PYTHONPATH automatically set to project root by start.py (required for imports)
 - Database uses SQLite with SQLModel (check_same_thread=False required for FastAPI)
+- `requests_oauthlib` import in `syncer.py` is lazy — only imported when Instapaper sync actually runs (avoids unnecessary dependency loading for Raindrop-only setups)
 
 ## Important Quirks
 - Backend serves frontend static files at root URL
 - Worker processes bookmarks asynchronously via background loop
 - Audio files stored in `/data/audio/`
 - Database stored in `/data/db.sqlite` (or path set by SQLITE_DB_PATH env var)
+- Worker detects the actual output file extension (`.mp3` for Edge, `.wav` for Piper) — do not hardcode `.mp3` in audio file paths
 - TTS engines may require additional system dependencies:
-  - Piper: Needs piper phoneme files
-  - Pocket TTS: Requires model download on first use
+  - Piper: Uses `synthesize_wav()` (piper-tts v1.4.2). Outputs `.wav` files. Voice models auto-downloaded via `download_voice()`. Chunks long text at word boundaries (max 2000 chars).
+  - Pocket TTS: Uses Kyutai `moshi` TTSModel (1.6B params). Outputs `.wav` at 24000 Hz. First use downloads ~3 GB model from HuggingFace. Supports "default" voice (auto-selects first available from `kyutai/tts-voices`) and "cloned" voice (via uploaded 5s 24 kHz mono WAV). GPU (CUDA) acceleration when available.

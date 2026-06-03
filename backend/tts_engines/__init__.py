@@ -32,7 +32,8 @@ def _build_piper_engine() -> Type[BaseTTSEngine]:
 
 def _build_pocket_engine() -> Type[BaseTTSEngine]:
     try:
-        import torch  # noqa: F401 – verify package is available
+        import moshi  # noqa: F401
+        import sphn  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(
             "Kyutai Pocket TTS dependencies are not installed. "

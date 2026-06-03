@@ -5,3 +5,5 @@
 numpy>=1.24.0
 torch>=2.0.0
 torchaudio>=2.0.0
+moshi>=0.2.0
+sphn>=0.1.0

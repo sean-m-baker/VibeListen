@@ -31,17 +31,25 @@ def test_get_piper_engine_without_deps_raises_gracefully():
     If piper-tts package is NOT installed, requesting 'piper' should raise
     RuntimeError pointing to the specific requirements-piper.txt file.
     """
-    with pytest.raises(RuntimeError, match="pip install -r requirements-piper.txt"):
-        get_tts_engine("piper")
+    try:
+        from piper import PiperVoice  # noqa: F401
+        pytest.skip("piper-tts is installed — cannot test missing-dependency path")
+    except ImportError:
+        with pytest.raises(RuntimeError, match="pip install -r requirements-piper.txt"):
+            get_tts_engine("piper")
 
 
 def test_get_pocket_engine_without_deps_raises_gracefully():
     """
-    If torch package is NOT installed, requesting 'pocket' should raise
+    If moshi package is NOT installed, requesting 'pocket' should raise
     RuntimeError pointing to the specific requirements-pocket.txt file.
     """
-    with pytest.raises(RuntimeError, match="pip install -r requirements-pocket.txt"):
-        get_tts_engine("pocket")
+    try:
+        import moshi  # noqa: F401
+        pytest.skip("moshi is installed — cannot test missing-dependency path")
+    except ImportError:
+        with pytest.raises(RuntimeError, match="pip install -r requirements-pocket.txt"):
+            get_tts_engine("pocket")
 
 
 def test_list_available_engines():

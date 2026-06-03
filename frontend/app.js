@@ -431,8 +431,53 @@ document.addEventListener("DOMContentLoaded", () => {
     const referenceFilename = document.getElementById("reference-filename");
     const btnSaveSettings = document.getElementById("btn-save-settings");
 
+    const settingSyncService = document.getElementById("setting-sync-service");
+    const settingRaindropToken = document.getElementById("setting-raindrop-token");
+    const settingInstapaperKey = document.getElementById("setting-instapaper-key");
+    const settingInstapaperSecret = document.getElementById("setting-instapaper-secret");
+    const settingInstapaperUsername = document.getElementById("setting-instapaper-username");
+    const settingInstapaperPassword = document.getElementById("setting-instapaper-password");
+    const groupRaindrop = document.getElementById("group-raindrop");
+    const groupInstapaper = document.getElementById("group-instapaper");
+
     // Track the currently selected file for upload
     let pendingReferenceFile = null;
+
+    // ----------------- Settings Tab Switching -----------------
+
+    const settingsTabBtns = document.querySelectorAll(".settings-tab");
+    const settingsTabContents = document.querySelectorAll(".settings-tab-content");
+
+    settingsTabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const tab = btn.getAttribute("data-settings-tab");
+            settingsTabBtns.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            settingsTabContents.forEach(c => c.classList.remove("active"));
+            document.getElementById(`settings-${tab}`).classList.add("active");
+        });
+    });
+
+    // ----------------- Integration Toggle -----------------
+
+    function toggleIntegrationFields(service) {
+        if (service === "raindrop") {
+            groupRaindrop.style.display = "block";
+            groupInstapaper.style.display = "none";
+        } else if (service === "instapaper") {
+            groupRaindrop.style.display = "none";
+            groupInstapaper.style.display = "block";
+        } else {
+            groupRaindrop.style.display = "block";
+            groupInstapaper.style.display = "block";
+        }
+    }
+
+    settingSyncService.addEventListener("change", () => {
+        toggleIntegrationFields(settingSyncService.value);
+    });
+
+    // ----------------- Load & Save Settings -----------------
 
     async function loadSettings() {
         try {
@@ -441,13 +486,34 @@ document.addEventListener("DOMContentLoaded", () => {
             const settings = await response.json();
             const ttsSettings = settings.tts || {};
 
+            await disableUnavailableEngines();
+
             if (ttsSettings.tts_engine) {
                 settingEngine.value = ttsSettings.tts_engine;
                 await populateVoices(ttsSettings.tts_engine);
+                const groupRef = document.getElementById("group-reference");
+                groupRef.style.display = ttsSettings.tts_engine === "pocket" ? "block" : "none";
             }
             if (ttsSettings.tts_voice) {
                 settingVoice.value = ttsSettings.tts_voice;
             }
+
+            // General settings (Sync Service)
+            const generalSettings = settings.general || {};
+            settingSyncService.value = generalSettings.sync_service || "both";
+
+            // Raindrop settings
+            const raindropSettings = settings.raindrop || {};
+            settingRaindropToken.value = raindropSettings.raindrop_token || "";
+
+            // Instapaper settings
+            const instapaperSettings = settings.instapaper || {};
+            settingInstapaperKey.value = instapaperSettings.instapaper_consumer_key || "";
+            settingInstapaperSecret.value = instapaperSettings.instapaper_consumer_secret || "";
+            settingInstapaperUsername.value = instapaperSettings.instapaper_username || "";
+            settingInstapaperPassword.value = instapaperSettings.instapaper_password || "";
+
+            toggleIntegrationFields(settingSyncService.value);
         } catch (error) {
             console.error("Failed to load settings:", error);
         }
@@ -495,12 +561,37 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target === modalSettings) modalSettings.classList.add("hidden");
     });
 
+    async function disableUnavailableEngines() {
+        try {
+            const response = await fetch("/api/tts/engines");
+            if (!response.ok) return;
+            const data = await response.json();
+            const engineSelect = document.getElementById("setting-engine");
+            Array.from(engineSelect.options).forEach(option => {
+                option.textContent = option.getAttribute("data-original-text") || option.textContent;
+                option.setAttribute("data-original-text", option.textContent);
+                if (data.engines[option.value] === false) {
+                    option.disabled = true;
+                    option.textContent += " (unavailable)";
+                }
+            });
+            if (engineSelect.selectedOptions[0].disabled) {
+                engineSelect.value = "";
+            }
+        } catch (e) {
+            console.error("Failed to load engine availability:", e);
+        }
+    }
+
     settingEngine.addEventListener("change", async () => {
         const engine = settingEngine.value;
         await populateVoices(engine);
-        // Show/hide reference upload based on engine
         const groupRef = document.getElementById("group-reference");
         groupRef.style.display = engine === "pocket" ? "block" : "none";
+        if (engine !== "pocket") {
+            pendingReferenceFile = null;
+            referenceFilename.textContent = "";
+        }
     });
 
     settingReference.addEventListener("change", (e) => {
@@ -516,6 +607,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const voice = settingVoice.value;
 
         if (!voice) {
+            settingsTabBtns.forEach(b => b.classList.remove("active"));
+            document.querySelector('.settings-tab[data-settings-tab="speech"]').classList.add("active");
+            settingsTabContents.forEach(c => c.classList.remove("active"));
+            document.getElementById("settings-speech").classList.add("active");
             showToast("❌ Please select a voice.", "error");
             return;
         }
@@ -543,6 +638,88 @@ document.addEventListener("DOMContentLoaded", () => {
                     key: "tts_voice",
                     value: voice,
                     section: "tts"
+                })
+            });
+
+            // Save Sync Service
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "sync_service",
+                    value: settingSyncService.value,
+                    section: "general"
+                })
+            });
+
+            // Save Raindrop Token
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "raindrop_token",
+                    value: settingRaindropToken.value,
+                    section: "raindrop"
+                })
+            });
+
+            // Save Instapaper consumer credentials
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_consumer_key",
+                    value: settingInstapaperKey.value,
+                    section: "instapaper"
+                })
+            });
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_consumer_secret",
+                    value: settingInstapaperSecret.value,
+                    section: "instapaper"
+                })
+            });
+
+            // Save Instapaper username and password
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_username",
+                    value: settingInstapaperUsername.value,
+                    section: "instapaper"
+                })
+            });
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_password",
+                    value: settingInstapaperPassword.value,
+                    section: "instapaper"
+                })
+            });
+
+            // Clear cached Instapaper OAuth tokens to force re-authentication with new credentials
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_oauth_token",
+                    value: "",
+                    section: "instapaper"
+                })
+            });
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    key: "instapaper_oauth_token_secret",
+                    value: "",
+                    section: "instapaper"
                 })
             });
 
