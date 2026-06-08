@@ -1,9 +1,12 @@
 import logging
+import os
 import requests
+import urllib.parse
 from datetime import datetime, timezone
 from sqlmodel import Session, select
 from backend.config import RAINDROP_TOKEN
-from backend.database import Bookmark
+from backend.database import Bookmark, get_setting, set_setting
+
 
 # Configure logger for the syncer module
 logger = logging.getLogger("VibeListen.Syncer")
@@ -20,20 +23,19 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
     """
     logger.info("Initializing Raindrop.io sync process...")
     
-    if not RAINDROP_TOKEN:
-        logger.error("RAINDROP_TOKEN environment variable is not configured or empty.")
-        raise ValueError("RAINDROP_TOKEN is not configured. Please add it to your .env file.")
+    db_token = get_setting(session, "raindrop_token", default="", section="raindrop")
+    token = (db_token or RAINDROP_TOKEN).strip()
+    
+    if not token:
+        logger.error("Raindrop API token is not configured or empty.")
+        raise ValueError("Raindrop API token is not configured.")
 
     # Securely print a masked preview of the key to inspect loading issues
-    clean_token = RAINDROP_TOKEN.strip()
-    masked_token = clean_token[:6] + "..." + clean_token[-4:] if len(clean_token) > 10 else "[TOO_SHORT]"
-    logger.info(f"API Token loaded successfully. Length: {len(RAINDROP_TOKEN)} chars (Masked preview: {masked_token})")
+    masked_token = token[:6] + "..." + token[-4:] if len(token) > 10 else "[TOO_SHORT]"
+    logger.info(f"API Token loaded successfully. Length: {len(token)} chars (Masked preview: {masked_token})")
     
-    if len(RAINDROP_TOKEN) != len(clean_token):
-        logger.warning("⚠️ Warning: Your RAINDROP_TOKEN in .env has trailing or leading whitespaces. We will strip them for this request.")
-
     headers = {
-        "Authorization": f"Bearer {clean_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
     
@@ -111,3 +113,218 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
         logger.info("Sync complete. No new bookmarks were found to import.")
 
     return new_bookmarks_count
+
+
+def get_instapaper_oauth_tokens(
+    consumer_key: str, consumer_secret: str, username: str, password: str
+) -> tuple[str, str]:
+    """
+    Exchanges Instapaper username & password credentials for OAuth 1.0a access tokens
+    using the Instapaper xAuth API endpoint.
+    """
+    from requests_oauthlib import OAuth1
+    url = "https://www.instapaper.com/api/1/oauth/access_token"
+    auth = OAuth1(consumer_key, client_secret=consumer_secret)
+    data = {
+        "x_auth_username": username,
+        "x_auth_password": password,
+        "x_auth_mode": "client_auth"
+    }
+    logger.info("Sending xAuth request to Instapaper...")
+    response = requests.post(url, auth=auth, data=data, timeout=10)
+    
+    if response.status_code == 401:
+        logger.error("❌ HTTP 401 Unauthorized: Invalid Instapaper credentials or API consumer keys.")
+        raise ValueError("Invalid Instapaper credentials or consumer keys.")
+        
+    response.raise_for_status()
+    
+    # Parse responses which are returned as query string parameters
+    params = urllib.parse.parse_qs(response.text)
+    oauth_token = params.get("oauth_token", [None])[0]
+    oauth_token_secret = params.get("oauth_token_secret", [None])[0]
+    
+    if not oauth_token or not oauth_token_secret:
+        logger.error(f"Failed to parse OAuth tokens from response body: {response.text}")
+        raise ValueError("Invalid OAuth response payload from Instapaper.")
+        
+    return oauth_token, oauth_token_secret
+
+
+def sync_instapaper(session: Session, limit: int = 50) -> int:
+    """
+    Polls Instapaper for the latest bookmarks using OAuth 1.0a, parses them,
+    and saves any new entries to the database with a 'pending' status.
+    
+    Returns the count of newly added bookmarks.
+    """
+    logger.info("Initializing Instapaper sync process...")
+    
+    # 1. Load consumer credentials (DB first, fallback to env)
+    consumer_key = get_setting(session, "instapaper_consumer_key", default=os.getenv("INSTAPAPER_CONSUMER_KEY", ""), section="instapaper").strip()
+    consumer_secret = get_setting(session, "instapaper_consumer_secret", default=os.getenv("INSTAPAPER_CONSUMER_SECRET", ""), section="instapaper").strip()
+    
+    if not consumer_key or not consumer_secret:
+        logger.error("Instapaper consumer credentials are not configured.")
+        raise ValueError("Instapaper Consumer Key or Secret is not configured.")
+        
+    # 2. Check if we already have oauth token / secret saved in database
+    oauth_token = get_setting(session, "instapaper_oauth_token", default=os.getenv("INSTAPAPER_OAUTH_TOKEN", ""), section="instapaper").strip()
+    oauth_token_secret = get_setting(session, "instapaper_oauth_token_secret", default=os.getenv("INSTAPAPER_OAUTH_TOKEN_SECRET", ""), section="instapaper").strip()
+    
+    if not oauth_token or not oauth_token_secret:
+        # Require username/password to retrieve tokens
+        username = get_setting(session, "instapaper_username", default=os.getenv("INSTAPAPER_USERNAME", ""), section="instapaper").strip()
+        password = get_setting(session, "instapaper_password", default=os.getenv("INSTAPAPER_PASSWORD", ""), section="instapaper").strip()
+        
+        if not username or not password:
+            logger.error("Instapaper credentials or OAuth tokens are missing.")
+            raise ValueError("Instapaper credentials are not configured.")
+            
+        logger.info("No stored OAuth tokens. Performing xAuth login...")
+        oauth_token, oauth_token_secret = get_instapaper_oauth_tokens(
+            consumer_key, consumer_secret, username, password
+        )
+        
+        # Save tokens in database settings to cache them
+        set_setting(session, "instapaper_oauth_token", oauth_token, section="instapaper")
+        set_setting(session, "instapaper_oauth_token_secret", oauth_token_secret, section="instapaper")
+        logger.info("Successfully fetched and saved Instapaper OAuth tokens.")
+        
+    # 3. Request bookmarks list from Instapaper API
+    # Endpoints use OAuth1 authorization headers
+    from requests_oauthlib import OAuth1
+    auth = OAuth1(
+        consumer_key,
+        client_secret=consumer_secret,
+        resource_owner_key=oauth_token,
+        resource_owner_secret=oauth_token_secret
+    )
+    
+    url = "https://www.instapaper.com/api/1/bookmarks/list"
+    data = {"limit": limit}
+    
+    logger.info(f"Sending POST request to Instapaper API: {url}")
+    try:
+        response = requests.post(url, auth=auth, data=data, timeout=10)
+        logger.info(f"Instapaper API responded with HTTP Status Code: {response.status_code}")
+        
+        if response.status_code == 401:
+            logger.error("❌ HTTP 401 Unauthorized: Instapaper tokens are invalid. Clearing stored credentials to trigger re-auth.")
+            set_setting(session, "instapaper_oauth_token", "", section="instapaper")
+            set_setting(session, "instapaper_oauth_token_secret", "", section="instapaper")
+            raise RuntimeError("Instapaper API returned Unauthorized (401). Cached tokens cleared.")
+            
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"HTTP request failed: {str(e)}")
+        raise RuntimeError(f"Failed to connect to Instapaper API: {e}")
+        
+    try:
+        payload = response.json()
+    except Exception as e:
+        logger.error(f"Failed to parse Instapaper JSON response: {response.text}")
+        raise RuntimeError("Invalid JSON response from Instapaper API.") from e
+        
+    # Instapaper API returns list containing a mixture of objects.
+    # Bookmark elements have type = 'bookmark'.
+    new_bookmarks_count = 0
+    
+    for item in payload:
+        if isinstance(item, dict) and item.get("type") == "bookmark":
+            bookmark_id = item.get("bookmark_id")
+            if not bookmark_id:
+                continue
+                
+            # Check if this bookmark is already imported
+            statement = select(Bookmark).where(Bookmark.instapaper_id == bookmark_id)
+            existing = session.exec(statement).first()
+            if existing:
+                continue
+                
+            # Parse added_at (Unix timestamp)
+            time_val = item.get("time")
+            if time_val:
+                try:
+                    added_at = datetime.fromtimestamp(float(time_val), timezone.utc)
+                except Exception:
+                    added_at = datetime.now(timezone.utc)
+            else:
+                added_at = datetime.now(timezone.utc)
+                
+            # Extract domain from URL
+            link = item.get("url", "")
+            try:
+                parsed_url = urllib.parse.urlparse(link)
+                domain = parsed_url.netloc or "unknown.com"
+            except Exception:
+                domain = "unknown.com"
+                
+            # Create new bookmark
+            new_bookmark = Bookmark(
+                instapaper_id=bookmark_id,
+                service="instapaper",
+                title=item.get("title", "Untitled Bookmark"),
+                author=item.get("description", "")[:255] or "Unknown",
+                url=link,
+                domain=domain,
+                status="pending",
+                added_at=added_at
+            )
+            
+            logger.info(f"➕ Importing NEW Instapaper bookmark: ID {bookmark_id} | '{new_bookmark.title}' from {new_bookmark.domain}")
+            session.add(new_bookmark)
+            new_bookmarks_count += 1
+            
+    if new_bookmarks_count > 0:
+        session.commit()
+        logger.info(f"Database transaction committed. Successfully imported {new_bookmarks_count} new Instapaper bookmarks.")
+    else:
+        logger.info("Instapaper sync complete. No new bookmarks were found to import.")
+        
+    return new_bookmarks_count
+
+
+def sync_bookmarks(session: Session, limit: int = 50) -> int:
+    """
+    Unified sync dispatcher. Checks configured settings and runs syncs
+    for all active/enabled read-it-later integrations.
+    
+    Returns total count of new bookmarks successfully imported.
+    """
+    total_new = 0
+    errors = []
+    
+    # 1. Determine selected sync service
+    sync_service = get_setting(session, "sync_service", default="both", section="general").strip().lower()
+    
+    # 2. Check and run Raindrop.io sync
+    if sync_service in ["raindrop", "both"]:
+        # Verify if token or env var is configured
+        db_token = get_setting(session, "raindrop_token", default="", section="raindrop").strip()
+        if db_token or RAINDROP_TOKEN:
+            try:
+                total_new += sync_raindrops(session, limit)
+            except Exception as e:
+                logger.error(f"Sync dispatcher: Raindrop sync failed: {e}")
+                errors.append(f"Raindrop sync: {e}")
+                
+    # 3. Check and run Instapaper sync
+    if sync_service in ["instapaper", "both"]:
+        consumer_key = get_setting(session, "instapaper_consumer_key", default=os.getenv("INSTAPAPER_CONSUMER_KEY", ""), section="instapaper").strip()
+        if consumer_key:
+            try:
+                total_new += sync_instapaper(session, limit)
+            except Exception as e:
+                logger.error(f"Sync dispatcher: Instapaper sync failed: {e}")
+                errors.append(f"Instapaper sync: {e}")
+                
+    if errors:
+        # If both failed, or one failed and the other wasn't run/configured, raise an error
+        # otherwise we still return the synced count.
+        if len(errors) == 1 and total_new == 0:
+            raise RuntimeError(errors[0])
+        elif len(errors) > 1 and total_new == 0:
+            raise RuntimeError("; ".join(errors))
+            
+    return total_new

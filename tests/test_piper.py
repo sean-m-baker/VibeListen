@@ -94,8 +94,15 @@ def mock_piper_voice():
     """Creates a mock PiperVoice class and its instances."""
     with patch("backend.tts_engines.piper_engine.PiperVoice") as MockVoice:
         mock_instance = MagicMock()
-        mock_instance.synthesize.return_value = [b"audio_chunk_1", b"audio_chunk_2"]
-        mock_instance.sample_rate = 22050
+
+        def fake_synthesize_wav(text, wav_file, syn_config=None, set_wav_format=True, **kwargs):
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(22050)
+            wav_file.writeframes(b"\x00\x00" * 22050)  # 1 second of silence
+            return None
+
+        mock_instance.synthesize_wav.side_effect = fake_synthesize_wav
         MockVoice.load.return_value = mock_instance
         yield MockVoice, mock_instance
 
@@ -114,51 +121,59 @@ async def test_piper_engine_synthesize_success(mock_piper_voice, tmp_path):
     engine = PiperEngine()
     output_path = str(tmp_path / "output.mp3")
 
-    with patch("backend.tts_engines.piper_engine.ensure_piper_voice") as mock_ensure:
-        mock_ensure.return_value = Path("/fake/model.onnx")
+    # Create fake model files so exists checks pass
+    voice_dir = tmp_path / "models" / "piper"
+    voice_dir.mkdir(parents=True)
+    (voice_dir / "en_US-lessac-medium.onnx").write_text("fake model")
+    (voice_dir / "en_US-lessac-medium.onnx.json").write_text("fake config")
 
-        with patch("backend.tts_engines.piper_engine.AudioSegment") as MockAudio:
-            mock_segment = MagicMock()
-            
-            def create_file_on_export(*args, **kwargs):
-                # Actually create the output file so os.path.getsize works
-                Path(args[0]).write_text("fake mp3 content")
-            
-            mock_segment.export.side_effect = create_file_on_export
-            MockAudio.from_wav.return_value = mock_segment
+    with patch("backend.tts_engines.piper_engine.MODELS_DIR", tmp_path / "models"):
+        result = await engine.synthesize(
+            text="Hello world.",
+            title="Test Article",
+            author="Test Author",
+            output_path=output_path,
+            voice="en_US-lessac-medium",
+        )
 
-            result = await engine.synthesize(
-                text="Hello world.",
-                title="Test Article",
-                author="Test Author",
-                output_path=output_path,
-                voice="en_US-lessac-medium",
-            )
-
-    assert result["filesize"] >= 0
-    MockAudio.from_wav.assert_called_once()
-    mock_segment.export.assert_called_once_with(output_path, format="mp3", bitrate="128k")
+    expected_wav = output_path.replace(".mp3", ".wav")
+    assert os.path.exists(expected_wav)
+    assert result["filesize"] > 0
+    assert result["duration"] > 0
+    # Verify it's a valid WAV file
+    import wave
+    with wave.open(expected_wav, "rb") as w:
+        assert w.getnchannels() == 1
+        assert w.getsampwidth() == 2
+        assert w.getframerate() == 22050
+        assert w.getnframes() > 0
 
 
 @pytest.mark.asyncio
-async def test_piper_engine_synthesize_no_pydub(mock_piper_voice, tmp_path):
-    from backend.tts_engines.piper_engine import PiperEngine
+async def test_piper_engine_synthesize_paragraph_chunking(mock_piper_voice, tmp_path):
+    """Verify that text exceeding MAX_CHUNK_CHARS is split and concatenated."""
+    from backend.tts_engines.piper_engine import PiperEngine, MAX_CHUNK_CHARS
 
     engine = PiperEngine()
     output_path = str(tmp_path / "output.mp3")
 
-    with patch("backend.tts_engines.piper_engine.ensure_piper_voice") as mock_ensure:
-        mock_ensure.return_value = Path("/fake/model.onnx")
+    voice_dir = tmp_path / "models" / "piper"
+    voice_dir.mkdir(parents=True)
+    (voice_dir / "en_US-lessac-medium.onnx").write_text("fake model")
+    (voice_dir / "en_US-lessac-medium.onnx.json").write_text("fake config")
 
-        with patch("backend.tts_engines.piper_engine.AudioSegment", None):
-            result = await engine.synthesize(
-                text="Hello world.",
-                title="Test Article",
-                author="Test Author",
-                output_path=output_path,
-                voice="en_US-lessac-medium",
-            )
+    # Create text that requires two chunks
+    long_para = "word " * (MAX_CHUNK_CHARS // 5)
 
-    assert result["filesize"] >= 0
-    # With no pydub, it should fall back to .wav
-    assert os.path.exists(output_path.replace(".mp3", ".wav"))
+    with patch("backend.tts_engines.piper_engine.MODELS_DIR", tmp_path / "models"):
+        result = await engine.synthesize(
+            text=long_para,
+            title="Chunking Test",
+            author="Tester",
+            output_path=output_path,
+            voice="en_US-lessac-medium",
+        )
+
+    expected_wav = output_path.replace(".mp3", ".wav")
+    assert os.path.exists(expected_wav)
+    assert result["filesize"] > 0

@@ -155,39 +155,87 @@
     <div id="modal-settings" class="modal-overlay hidden">
         <div class="glass-panel modal-content">
             <div class="modal-header">
-                <h2>Speech Settings</h2>
+                <h2>Settings</h2>
                 <button id="btn-settings-close" class="btn-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="settings-group">
-                    <label for="setting-engine">TTS Engine</label>
-                    <select id="setting-engine" class="settings-select">
-                        <option value="edge">Microsoft Edge TTS (Cloud)</option>
-                        <option value="piper">Piper TTS (Local ONNX)</option>
-                        <option value="pocket">Pocket TTS (Local Neural + Cloning)</option>
-                    </select>
-                    <p class="setting-hint">Select the speech synthesis backend. Edge requires internet; Piper and Pocket run offline.</p>
+                <!-- Settings Tab Bar -->
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-settings-tab="speech">Speech</button>
+                    <button class="settings-tab" data-settings-tab="integrations">Integrations</button>
                 </div>
 
-                <div class="settings-group">
-                    <label for="setting-voice">Voice</label>
-                    <select id="setting-voice" class="settings-select">
-                        <option value="">-- Select a voice --</option>
-                    </select>
-                    <p class="setting-hint">Choose a voice for your podcast narrator.</p>
-                </div>
-
-                <div class="settings-group" id="group-reference">
-                    <label for="setting-reference">Reference Voice (Cloning)</label>
-                    <div class="file-upload-zone">
-                        <input type="file" id="setting-reference" accept="audio/wav,.wav" hidden>
-                        <label for="setting-reference" class="btn btn-secondary btn-upload">
-                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                            <span>Upload 5s WAV</span>
-                        </label>
-                        <span id="reference-filename" class="file-name"></span>
+                <!-- Speech Tab -->
+                <div class="settings-tab-content active" id="settings-speech">
+                    <div class="settings-group">
+                        <label for="setting-engine">TTS Engine</label>
+                        <select id="setting-engine" class="settings-select">
+                            <option value="edge">Microsoft Edge TTS (Cloud)</option>
+                            <option value="piper">Piper TTS (Local ONNX)</option>
+                            <option value="pocket">Pocket TTS (Local Neural + Cloning)</option>
+                        </select>
+                        <p class="setting-hint">Select the speech synthesis backend. Edge requires internet; Piper and Pocket run offline.</p>
                     </div>
-                    <p class="setting-hint">Upload a 5-second, 24kHz mono WAV file to clone a custom voice (Pocket TTS only).</p>
+
+                    <div class="settings-group">
+                        <label for="setting-voice">Voice</label>
+                        <select id="setting-voice" class="settings-select">
+                            <option value="">-- Select a voice --</option>
+                        </select>
+                        <p class="setting-hint">Choose a voice for your podcast narrator.</p>
+                    </div>
+
+                    <div class="settings-group" id="group-reference">
+                        <label for="setting-reference">Reference Voice (Cloning)</label>
+                        <div class="file-upload-zone">
+                            <input type="file" id="setting-reference" accept="audio/wav,.wav" hidden>
+                            <label for="setting-reference" class="btn btn-secondary btn-upload">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                <span>Upload 5s WAV</span>
+                            </label>
+                            <span id="reference-filename" class="file-name"></span>
+                        </div>
+                        <p class="setting-hint">Upload a 5-second, 24kHz mono WAV file to clone a custom voice (Pocket TTS only).</p>
+                    </div>
+                </div>
+
+                <!-- Integrations Tab -->
+                <div class="settings-tab-content" id="settings-integrations">
+                    <div class="settings-group">
+                        <label for="setting-sync-service">Sync Service</label>
+                        <select id="setting-sync-service" class="settings-select">
+                            <option value="raindrop">Raindrop.io only</option>
+                            <option value="instapaper">Instapaper only</option>
+                            <option value="both">Both (Raindrop & Instapaper)</option>
+                        </select>
+                        <p class="setting-hint">Select which service(s) to fetch bookmarks from.</p>
+                    </div>
+
+                    <div class="settings-group" id="group-raindrop">
+                        <label for="setting-raindrop-token">Raindrop.io Personal Token</label>
+                        <input type="password" id="setting-raindrop-token" class="settings-input" placeholder="Paste Raindrop token here...">
+                        <p class="setting-hint">Get a static "Test Token" from Raindrop.io integrations page.</p>
+                    </div>
+
+                    <div id="group-instapaper">
+                        <div class="settings-group">
+                            <label for="setting-instapaper-key">Instapaper Consumer Key</label>
+                            <input type="text" id="setting-instapaper-key" class="settings-input" placeholder="Consumer Key...">
+                        </div>
+                        <div class="settings-group">
+                            <label for="setting-instapaper-secret">Instapaper Consumer Secret</label>
+                            <input type="password" id="setting-instapaper-secret" class="settings-input" placeholder="Consumer Secret...">
+                        </div>
+                        <div class="settings-group">
+                            <label for="setting-instapaper-username">Instapaper Username / Email</label>
+                            <input type="text" id="setting-instapaper-username" class="settings-input" placeholder="user@example.com...">
+                        </div>
+                        <div class="settings-group">
+                            <label for="setting-instapaper-password">Instapaper Password</label>
+                            <input type="password" id="setting-instapaper-password" class="settings-input" placeholder="Password...">
+                        </div>
+                        <p class="setting-hint">Used for xAuth authentication once, credentials are cached as OAuth tokens.</p>
+                    </div>
                 </div>
 
                 <div class="settings-actions">

@@ -5,7 +5,7 @@
 
 ### 1. Executive Summary & Vision
 
-**VibeListen** is a self-hosted, lightweight utility that automatically bridges the gap between text-based "read-it-later" services (such as Instapaper, Raindrop.io, and Pocket) and audio-based podcast players (such as Overcast, Pocket Casts, and Apple Podcasts). 
+**VibeListen** is a self-hosted, lightweight utility that automatically bridges the gap between text-based "read-it-later" services (such as Instapaper and Raindrop.io) and audio-based podcast players (such as Overcast, Pocket Casts, and Apple Podcasts). 
 
 The goal of VibeListen is to convert saved text bookmarks into highly natural speech audio files and serve them via a standard, secure podcast RSS feed. This allows users to listen to their personal reading list on the go using their standard podcast app, with support for local offline-first TTS generation (using state-of-the-art models like Kyutai Labs' **Pocket TTS** and **Piper TTS**) or zero-config cloud-based options.
 
@@ -36,12 +36,12 @@ graph TD
 
 To get articles, VibeListen will support multiple services. The following table compares integrations to help the user choose their backend:
 
-| Metric / Feature | **Instapaper** (User Choice) | **Raindrop.io** (Recommended Alternative) | **Pocket** (Alternative) |
-| :--- | :--- | :--- | :--- |
-| **API Ease of Use** | **Medium-Hard**: Full API requires OAuth 1.0a with custom HMAC-SHA1 signatures. | **Excellent**: Simple REST API using static personal "Test Tokens" created in 5 seconds. | **Medium**: Standard REST API using OAuth 2.0 flow. |
-| **Developer Access** | **Restricted**: Requires submitting a web form for `Consumer Key` and waiting for manual approval. | **Instant**: Developer console is open and accessible immediately under account settings. | **Instant**: Instant developer key creation in the Pocket console. |
-| **Article Extraction**| Standard HTML or text. Requires third-party scraper for full content if using bookmark sync. | **Built-in**: Raindrop parses and stores clean text, HTML, and markdown of articles out-of-the-box. | Standard URLs; requires full webpage extraction using custom logic. |
-| **RSS Feeds** | Available for premium users, but text-only, not audio-friendly. | Has built-in public and private RSS feeds of folders/collections. | Basic bookmark feed, requires parsing. |
+| Metric / Feature | **Instapaper** (User Choice) | **Raindrop.io** (Recommended Alternative) |
+| :--- | :--- | :--- |
+| **API Ease of Use** | **Medium-Hard**: Full API requires OAuth 1.0a with custom HMAC-SHA1 signatures. | **Excellent**: Simple REST API using static personal "Test Tokens" created in 5 seconds. |
+| **Developer Access** | **Restricted**: Requires submitting a web form for `Consumer Key` and waiting for manual approval. | **Instant**: Developer console is open and accessible immediately under account settings. |
+| **Article Extraction**| Standard HTML or text. Requires third-party scraper for full content if using bookmark sync. | **Built-in**: Raindrop parses and stores clean text, HTML, and markdown of articles out-of-the-box. |
+| **RSS Feeds** | Available for premium users, but text-only, not audio-friendly. | Has built-in public and private RSS feeds of folders/collections. |
 
 > [!TIP]
 > **Recommendation**: While we will support **Instapaper** as requested, we strongly recommend implementing **Raindrop.io** as the default or first integration due to its instant developer access, personal token system, and built-in full-text parser. We will construct a pluggable integration adapter that supports both!
@@ -54,7 +54,7 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 
 #### A. Pocket TTS (Kyutai Labs)
 *   **Type**: Offline, local neural TTS (Continuous Audio Language Models - CALM framework).
-*   **Specs**: 100M parameter model, highly CPU-optimized, runs faster than real-time on consumer laptop CPUs.
+*   **Specs**: 1.6B parameter model (Moshi TTSModel with 32 quantizers), GPU-accelerated (CUDA when available), also runs on CPU.
 *   **Special Feature**: **Voice Cloning** — can clone any voice from a 5-second WAV reference audio file (perfect for matching your own voice, or your favorite narrator).
 *   **Pros**: Incredible naturalness, offline privacy, multilingual support (EN, FR, DE, ES, PT, IT).
 *   **Cons**: Requires Python ML setup (PyTorch/ONNX dependencies).
@@ -77,17 +77,17 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 ### 5. Technical Stack & Architecture
 
 #### Core Tech Stack
-1.  **Backend & Pipeline**: **Python 3.10+ (FastAPI)**
+1.  **Backend & Pipeline**: **Python 3.13+ (FastAPI)**
     *   *Why?* The local ML engines (Piper, Pocket TTS) are Python-native or Python-friendly. Using FastAPI provides a high-performance web server, simple background tasks for audio generation, and easy SQLite interfacing.
 2.  **Database**: **SQLite** with **SQLAlchemy/SQLModel**
     *   To keep the app self-contained, lightweight, and zero-config.
-3.  **Frontend Dashboard**: **Modern SPA (Vite + React or pure Vanilla JS + CSS)**
+3.  **Frontend Dashboard**: **Vanilla JS + CSS**
     *   *Why?* Sleek, high-performance interface. Vanilla JS and raw CSS with glassmorphism aesthetics keep the application extremely portable and fast to serve directly from the FastAPI backend.
-4.  **Audio Processing**: **FFmpeg / pydub**
-    *   For stitching intro/outro audio, converting raw WAV to space-efficient MP3 (or AAC), and normalizing audio volume.
+4.  **Audio Processing**: **Raw WAV / MP3 handling** (pydub unavailable on Python 3.13+)
+    *   TTS engines output native formats: Edge TTS produces `.mp3`; Piper and Pocket TTS produce `.wav` directly. No transcoding step — files are served as-is.
 
 #### Directory & Data Flow
-*   **`/audio/`**: Serves generated MP3 files.
+*   **`/audio/`**: Serves generated audio files (`.mp3` from Edge, `.wav` from Piper/Pocket).
 *   **`/rss.xml`**: Dynamically serves the podcast feed.
 *   **`/db.sqlite`**: Stores bookmarks, sync times, and configuration settings.
 
@@ -103,11 +103,11 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 #### Feature 2: Audio Synthesis Pipeline (Backend)
 *   **Job Queue**: Processes text-to-speech tasks in a background thread to prevent blocking the UI.
 *   **Stitched Intros**: Prepends a short programmatic intro: *"Welcome to VibeListen. Reading: [Title] by [Author], published in [Domain]."*
-*   **Format Transcoder**: Encodes the output into constant bitrate (CBR) MP3 format (96-128kbps, mono) optimal for voice podcasts to save bandwidth and storage.
+*   **Format Transcoder**: Outputs native format from each TTS engine — `.mp3` from Edge, `.wav` from Piper and Pocket. Files are served without transcoding.
 
 #### Feature 3: Podcast Feed Server
 *   **Standard Compliance**: Generates a valid RSS 2.0 feed complying with iTunes/Apple Podcasts standards.
-*   **Enclosures**: Includes `<enclosure>` tags with absolute HTTP URLs pointing to the local `/audio/<id>.mp3` endpoints.
+*   **Enclosures**: Includes `<enclosure>` tags with absolute HTTP URLs pointing to the local `/audio/<id>.mp3` (Edge) or `/audio/<id>.wav` (Piper/Pocket) endpoints.
 *   **External Access**: Provides instructions on using tunneling services (e.g. `ngrok`, `localtunnel`, or `Tailscale`) so podcast apps on mobile phones can download and stream audio from the local machine.
 
 #### Feature 4: Premium Web Dashboard (Frontend)
@@ -147,7 +147,7 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 |  v                                                                      |
 |  +--------------------+   +---------------------+   +----------------+  |
 |  |  Audio Pipeline    |-->| TTS Adapter         |-->| Local Audio    |  |
-|  |  (Background Queue) |   | (Pocket/Piper/Edge) |   | Store (.mp3)   |  |
+|  |  (Background Queue) |   | (Pocket/Piper/Edge) |   | Store (.wav/.mp3)|  |
 |  +--------+-----------+   +---------------------+   +--------+-------+  |
 |           |                                                  |          |
 |           v                                                  v          |
@@ -156,7 +156,7 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 |  +--------+-----------+                             +--------+-------+  |
 |           |                                                  |          |
 +-----------|--------------------------------------------------|----------+
-            | (Serves RSS Feed)                                | (Serves MP3 files)
+            | (Serves RSS Feed)                                | (Serves audio files)
             v                                                  v
 +-----------+-----------+                             +--------+-------+
 |  Standard Podcast     |                             | Sleek Web      |
@@ -183,11 +183,10 @@ VibeListen will implement a pluggable audio synthesis system. Users can toggle b
 *   Add a local background process queue to handle heavier CPU audio generation.
 *   **Outcome**: Zero-internet, completely offline-capable audio generation with custom voice cloning.
 
-#### **Phase 3: Additional Read-it-Later Providers (Instapaper & Pocket)**
+#### **Phase 3: Additional Read-it-Later Providers (Instapaper)**
 *   Implement OAuth 1.0a flow and API integration for **Instapaper** full bookmark, sync, and extraction support.
-*   Implement OAuth 2.0 flow and API integration for **Pocket**.
 *   Design a pluggable read-it-later integration adapter pattern to easily scale to future backends.
-*   **Outcome**: Full support for all three major read-it-later systems.
+*   **Outcome**: Full support for both Instapaper and Raindrop.io read-it-later systems.
 
 #### **Phase 4: Optimization, Multi-Platform & Packaging**
 *   Add Dockerfile for easy multi-arch deployments (x86 and ARM64/Raspberry Pi).

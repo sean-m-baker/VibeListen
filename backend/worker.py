@@ -128,8 +128,8 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 session, "tts_voice", default=os.getenv("DEFAULT_VOICE", "en-US-GuyNeural"), section="tts"
             )
 
-            filename = f"raindrop_{bookmark.raindrop_id}.mp3"
-            output_path = AUDIO_DIR / filename
+            stem = f"raindrop_{bookmark.raindrop_id}" if bookmark.raindrop_id else f"instapaper_{bookmark.instapaper_id}"
+            output_path = AUDIO_DIR / f"{stem}.mp3"
 
             stats = await generate_podcast_audio(
                 text=bookmark.clean_text,
@@ -139,6 +139,12 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 voice=tts_voice,
                 engine_name=tts_engine,
             )
+
+            if output_path.exists():
+                filename = f"{stem}.mp3"
+            else:
+                wav_path = output_path.with_suffix(".wav")
+                filename = f"{stem}.wav" if wav_path.exists() else f"{stem}.mp3"
 
             bookmark.audio_filename = filename
             bookmark.audio_filesize = stats["filesize"]

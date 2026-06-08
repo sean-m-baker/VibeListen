@@ -10,6 +10,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Activate virtual environment if it exists
+if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
 # Set PYTHONPATH so backend imports resolve correctly
 export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
 

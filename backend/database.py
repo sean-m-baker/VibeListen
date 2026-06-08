@@ -17,7 +17,9 @@ class Bookmark(SQLModel, table=True):
     Includes state trackers for content cleaning and audio synthesis.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    raindrop_id: int = Field(unique=True, index=True, nullable=False)
+    raindrop_id: Optional[int] = Field(default=None, unique=True, index=True, nullable=True)
+    instapaper_id: Optional[int] = Field(default=None, unique=True, index=True, nullable=True)
+    service: str = Field(default="raindrop", index=True, nullable=False)
     title: str = Field(nullable=False)
     author: Optional[str] = None
     url: str = Field(nullable=False)
@@ -71,8 +73,54 @@ def set_setting(db: Session, key: str, value: str, section: str = "general") -> 
     return new_setting
 
 
+def migrate_database() -> None:
+    """Run lightweight schema updates on existing database files dynamically."""
+    import sqlite3
+    import logging
+    db_logger = logging.getLogger("VibeListen.DatabaseMigration")
+    
+    # Simple relative/absolute config fallback
+    try:
+        from backend.config import SQLITE_DB_PATH
+    except ImportError:
+        from config import SQLITE_DB_PATH
+
+    db_path = SQLITE_DB_PATH
+    if not db_path.exists():
+        return
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Check existing columns in the bookmark table
+        cursor.execute("PRAGMA table_info(bookmark)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        # Add instapaper_id column if missing
+        if "instapaper_id" not in columns:
+            db_logger.info("Database migration: adding 'instapaper_id' column to 'bookmark' table.")
+            cursor.execute("ALTER TABLE bookmark ADD COLUMN instapaper_id INTEGER")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_bookmark_instapaper_id ON bookmark (instapaper_id)")
+            conn.commit()
+            
+        # Add service column if missing
+        if "service" not in columns:
+            db_logger.info("Database migration: adding 'service' column to 'bookmark' table.")
+            cursor.execute("ALTER TABLE bookmark ADD COLUMN service VARCHAR")
+            # Set default service to raindrop for existing rows
+            cursor.execute("UPDATE bookmark SET service = 'raindrop' WHERE service IS NULL")
+            cursor.execute("CREATE INDEX IF NOT EXISTS ix_bookmark_service ON bookmark (service)")
+            conn.commit()
+            
+        conn.close()
+    except Exception as e:
+        db_logger.error(f"Database migration failed: {str(e)}")
+
+
 def init_db() -> None:
     """Creates the SQLite database and all defined tables."""
+    migrate_database()
     SQLModel.metadata.create_all(engine)
 
 

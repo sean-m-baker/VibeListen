@@ -1,144 +1,112 @@
 import os
-import io
-import wave
+import time
 import logging
+import threading
 from typing import Dict, Any
 from pathlib import Path
 
+import sphn
+import torch
+import numpy as np
+
 from backend.tts_engines.base import BaseTTSEngine
-from backend.config import MODELS_DIR, REFERENCE_WAV_PATH
+from backend.config import REFERENCE_WAV_PATH
+from moshi.models.tts import get_default_tts_model
+from huggingface_hub import hf_hub_download, list_repo_files
 
 logger = logging.getLogger("VibeListen.PocketEngine")
 
-# Optional heavy dependencies - gracefully handled
-try:
-    import torch
-except ImportError:
-    torch = None
-
-try:
-    import numpy as np
-except ImportError:
-    np = None
+SAMPLE_RATE = 24000
+VOICE_REPO = "kyutai/tts-voices"
+_VOICES_CACHE: list[str] | None = None
+_VOICES_CACHE_TIME: float = 0
+_VOICES_CACHE_TTL = 300
 
 
 class PocketEngine(BaseTTSEngine):
     """
     Kyutai Labs Pocket TTS (CALM) engine with voice cloning support.
-    Requires: pip install -r requirements-pocket.txt
+    Uses the Kyutai Moshi TTS model (DSM-based).
 
-    Reference voice cloning:
-        Place a 5-second, 24kHz mono WAV file at the path set by
-        REFERENCE_WAV_PATH (default: data/models/reference.wav).
-        It will be used to guide the timbre of synthesized speech.
+    Voice options:
+        "default" — uses the first available voice from the HF repo.
+        "cloned" — uses the uploaded reference WAV for voice cloning.
+        Any other value — treated as a voice name to download from the
+        HuggingFace voice repo (kyutai/tts-voices).
     """
 
-    # Expected reference audio parameters
-    REF_SAMPLE_RATE = 24000
-    REF_CHANNELS = 1
-    REF_SAMPWIDTH = 2  # 16-bit
-    REF_MAX_DURATION_SEC = 10.0
-    REF_MIN_DURATION_SEC = 3.0
-
     def __init__(self):
-        if torch is None:
-            raise RuntimeError(
-                "Kyutai Pocket TTS is not installed. "
-                "Run: pip install -r requirements-pocket.txt"
-            )
-        self._model = None
-        self._reference_audio = None
+        self._tts: Any = None
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._lock = threading.Lock()
 
     def _load_model(self):
-        """
-        Lazily load the Pocket TTS model and reference cloning audio.
-        Called on first synthesize() invocation.
-        """
-        if self._model is not None:
+        if self._tts is not None:
             return
+        with self._lock:
+            if self._tts is not None:
+                return
+            logger.info(f"Loading Pocket TTS model (device={self._device})...")
+            self._tts = get_default_tts_model(n_q=32, device=self._device)
+            logger.info("Pocket TTS model loaded.")
 
-        logger.info("Initializing Kyutai Pocket TTS model...")
-        # ------------------------------------------------------------------
-        # Placeholder for actual model loading.
-        # Once dependencies are installed, replace with:
-        #   from moshi.models import loaders
-        #   self._model = loaders.get_pocket_model()
-        # ------------------------------------------------------------------
-        self._model = "placeholder_model"
-
-        if REFERENCE_WAV_PATH.exists():
-            self._validate_and_load_reference()
-        else:
-            logger.warning(
-                f"No reference voice found at {REFERENCE_WAV_PATH}. "
-                "Synthesis will use the default model voice instead of cloning."
-            )
-
-    def _validate_and_load_reference(self):
-        """
-        Validates the reference WAV file meets format requirements
-        and loads it into memory for the cloning pipeline.
-        """
-        ref_path = Path(REFERENCE_WAV_PATH)
-        logger.info(f"Validating reference voice: {ref_path}")
-
+    def _available_voices(self) -> list[str]:
+        global _VOICES_CACHE, _VOICES_CACHE_TIME
+        now = time.monotonic()
+        if _VOICES_CACHE is not None and (now - _VOICES_CACHE_TIME) < _VOICES_CACHE_TTL:
+            return _VOICES_CACHE
         try:
-            with wave.open(str(ref_path), "rb") as wf:
-                channels = wf.getnchannels()
-                sampwidth = wf.getsampwidth()
-                framerate = wf.getframerate()
-                n_frames = wf.getnframes()
-                duration = n_frames / float(framerate)
+            if self._tts is None:
+                self._load_model()
+            files = list_repo_files(VOICE_REPO)
+            suffix = self._tts.voice_suffix
+            names = set()
+            for f in files:
+                if suffix and f.endswith(suffix):
+                    names.add(f[: -len(suffix)])
+            _VOICES_CACHE = sorted(names)
+            _VOICES_CACHE_TIME = now
+            return _VOICES_CACHE
+        except Exception:
+            return _VOICES_CACHE or []
 
-                errors = []
-                if channels != self.REF_CHANNELS:
-                    errors.append(
-                        f"Expected {self.REF_CHANNELS} channel(s), got {channels}"
-                    )
-                if sampwidth != self.REF_SAMPWIDTH:
-                    errors.append(
-                        f"Expected {self.REF_SAMPWIDTH}-byte samples, got {sampwidth}"
-                    )
-                if framerate != self.REF_SAMPLE_RATE:
-                    errors.append(
-                        f"Expected {self.REF_SAMPLE_RATE} Hz, got {framerate} Hz"
-                    )
-                if duration < self.REF_MIN_DURATION_SEC:
-                    errors.append(
-                        f"Reference too short ({duration:.2f}s < {self.REF_MIN_DURATION_SEC}s)"
-                    )
-                if duration > self.REF_MAX_DURATION_SEC:
-                    errors.append(
-                        f"Reference too long ({duration:.2f}s > {self.REF_MAX_DURATION_SEC}s)"
-                    )
+    def _voice_to_path(self, voice: str) -> str:
+        if self._tts is None:
+            raise RuntimeError("Model not loaded. Call _load_model() first.")
 
-                if errors:
-                    raise ValueError("; ".join(errors))
-
-                raw_bytes = wf.readframes(n_frames)
-                # Convert to float32 tensor normalized to [-1, 1]
-                if np is None:
-                    raise RuntimeError(
-                        "numpy is required for reference voice processing. "
-                        "Run: pip install -r requirements-pocket.txt"
-                    )
-                samples = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
-                samples /= np.iinfo(np.int16).max
-                self._reference_audio = torch.from_numpy(samples)
-
-                logger.info(
-                    f"Reference voice loaded: {duration:.2f}s, "
-                    f"{framerate} Hz, {channels} channel(s)"
+        if voice == "cloned":
+            ref = Path(REFERENCE_WAV_PATH)
+            if not ref.exists():
+                raise RuntimeError(
+                    "No reference audio uploaded. Upload a 5-second, "
+                    "24kHz mono WAV in Settings first."
                 )
+            return str(ref.resolve())
 
-        except wave.Error as exc:
-            raise RuntimeError(
-                f"Reference file {ref_path} is not a valid WAV: {exc}"
-            ) from exc
+        if voice == "default":
+            voices = self._available_voices()
+            if not voices:
+                raise RuntimeError(
+                    "No default voices available. Upload a reference WAV and use 'cloned' voice."
+                )
+            voice = voices[0]
+
+        suffix = self._tts.voice_suffix
+        try:
+            local = hf_hub_download(
+                repo_id=VOICE_REPO,
+                filename=voice + suffix,
+            )
+            return local
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to load reference voice from {ref_path}: {exc}"
-            ) from exc
+            available = self._available_voices()
+            msg = f"Voice '{voice}' not found in {VOICE_REPO}."
+            if available:
+                msg += f" Available: {', '.join(available[:10])}"
+            raise RuntimeError(msg) from exc
+
+    def available_voice_names(self) -> list[str]:
+        return self._available_voices()
 
     async def synthesize(
         self,
@@ -149,10 +117,6 @@ class PocketEngine(BaseTTSEngine):
         voice: str,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """
-        Synthesize text to speech using Kyutai Pocket TTS.
-        If a valid reference voice is configured, voice cloning will be applied.
-        """
         clean_author = (
             author if author and author.lower() != "unknown" else "an unknown author"
         )
@@ -163,23 +127,16 @@ class PocketEngine(BaseTTSEngine):
 
         self._load_model()
 
-        # ------------------------------------------------------------------
-        # Placeholder for actual synthesis pipeline.
-        # Once dependencies are installed, replace with:
-        #   audio_tensor = self._model.generate(
-        #       text=full_text,
-        #       reference_audio=self._reference_audio,
-        #       voice=voice,
-        #   )
-        #   write_tensor_to_file(audio_tensor, output_path)
-        # ------------------------------------------------------------------
-        raise NotImplementedError(
-            "Kyutai Pocket TTS synthesis is not yet fully implemented. "
-            "Install requirements-pocket.txt and wire the real model calls "
-            "in backend/tts_engines/pocket_engine.py."
-        )
+        voice_path = self._voice_to_path(voice)
+        logger.info(f"Synthesizing with Pocket TTS (voice={voice})...")
+        pcms = self._tts.simple_generate(full_text, voice_path, show_progress=False)
+        if not pcms:
+            raise RuntimeError("Pocket TTS synthesis returned empty result.")
+        wav = pcms[0].cpu().numpy()
 
-        # The code below shows the intended production flow once wired:
-        # filesize = os.path.getsize(output_path)
-        # estimated_duration = filesize / 44100.0
-        # return {"filesize": filesize, "duration": estimated_duration}
+        wav_path = str(Path(output_path).with_suffix(".wav"))
+        sphn.write_wav(wav_path, wav, SAMPLE_RATE)
+
+        filesize = os.path.getsize(wav_path)
+        estimated_duration = wav.shape[-1] / SAMPLE_RATE
+        return {"filesize": filesize, "duration": estimated_duration}

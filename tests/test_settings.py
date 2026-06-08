@@ -115,10 +115,16 @@ def test_get_voices_unknown_engine(client):
 
 
 def test_upload_reference_audio(client, tmp_path):
-    """POST /api/tts/reference should accept a WAV file upload."""
+    """POST /api/tts/reference should accept a valid WAV file upload."""
+    import wave
     wav_file = tmp_path / "test_ref.wav"
-    wav_file.write_bytes(b"fake_wav_data")
+    with wave.open(str(wav_file), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(24000)
+        w.writeframes(b"\x00\x00" * 24000)
 
+    wav_bytes = wav_file.read_bytes()
     with open(wav_file, "rb") as f:
         response = client.post("/api/tts/reference", files={"file": f})
 
@@ -126,7 +132,7 @@ def test_upload_reference_audio(client, tmp_path):
     data = response.json()
     assert data["status"] == "success"
     assert "reference.wav" in data["path"]
-    assert data["size"] == len(b"fake_wav_data")
+    assert data["size"] == len(wav_bytes)
 
 
 def test_upload_reference_audio_rejects_non_wav(client, tmp_path):

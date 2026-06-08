@@ -799,6 +799,49 @@ audio::-webkit-media-controls-time-remaining-display {
    Settings Modal Styles
    ========================================================================== */
 
+.settings-tabs {
+    display: flex;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid var(--panel-border);
+    padding: 0.3rem;
+    border-radius: 10px;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.settings-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-muted);
+    font-family: var(--font-heading);
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.5rem 1.1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.settings-tab:hover {
+    color: var(--text-main);
+}
+
+.settings-tab.active {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.settings-tab-content {
+    display: none;
+}
+
+.settings-tab-content.active {
+    display: block;
+}
+
 .settings-group {
     margin-bottom: 1.5rem;
 }
@@ -890,24 +933,7 @@ audio::-webkit-media-controls-time-remaining-display {
     color: var(--text-main);
 }
 
-/* ==========================================================================
-   Settings Modal Styles
-   ========================================================================== */
-
-.settings-group {
-    margin-bottom: 1.5rem;
-}
-
-.settings-group label {
-    display: block;
-    font-family: var(--font-heading);
-    font-weight: 500;
-    font-size: 0.9rem;
-    color: var(--text-main);
-    margin-bottom: 0.5rem;
-}
-
-.settings-select {
+.settings-input {
     width: 100%;
     padding: 0.6rem 0.8rem;
     background: rgba(0, 0, 0, 0.3);
@@ -916,71 +942,12 @@ audio::-webkit-media-controls-time-remaining-display {
     color: var(--text-main);
     font-family: var(--font-body);
     font-size: 0.9rem;
-    cursor: pointer;
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
 }
 
-.settings-select:focus {
+.settings-input:focus {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-glow);
-}
-
-.settings-select option {
-    background: #1a1a2e;
-    color: var(--text-main);
-}
-
-.setting-hint {
-    font-size: 0.78rem;
-    color: var(--text-dark);
-    margin-top: 0.35rem;
-    line-height: 1.4;
-}
-
-.settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--panel-border);
-}
-
-.file-upload-zone {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-}
-
-.btn-upload {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem 0.9rem;
-    font-size: 0.85rem;
-}
-
-.file-name {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    font-style: italic;
-}
-
-.btn-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    padding: 0;
-    background: var(--secondary);
-    border-radius: 8px;
-    color: var(--text-muted);
-    transition: background 0.2s, color 0.2s;
-}
-
-.btn-icon:hover {
-    background: var(--secondary-hover);
-    color: var(--text-main);
 }

@@ -27,7 +27,7 @@ VibeListen/
    git clone https://github.com/yourorg/VibeListen.git
    cd VibeListen
    ```
-2. **Create a Python virtual environment** (recommended)
+2. **Create a Python virtual environment** (recommended, Python 3.13+)
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
@@ -35,8 +35,11 @@ VibeListen/
 3. **Install dependencies**
    ```bash
    pip install -r requirements.txt           # core deps
-   pip install -r requirements-local.txt     # optional local TTS engines
+   pip install -r requirements-local.txt     # all local TTS engines (Piper + Pocket)
    ```
+   > Install engines individually for a lighter footprint:
+   > - `pip install -r requirements-piper.txt`   — Piper (ONNX‑based, ~50 MB)
+   > - `pip install -r requirements-pocket.txt`  — Pocket (PyTorch‑based, ~3 GB on first use, GPU recommended)
 4. **Configure environment variables**
    - Copy the example file:
      ```bash
@@ -49,9 +52,11 @@ VibeListen/
 ## 🚀 Running the application (development)
 ```bash
 # Start both FastAPI server and background worker (development mode)
-python start.py
+python start.py                    # default port 8000
+python start.py --port 8001        # custom port
+PORT=8001 python start.py          # or via PORT env var
 ```
-*The server will be reachable at `http://localhost:8000` and the static UI is served from the same origin.*
+*The server will be reachable at `http://localhost:8000` (or the configured port) and the static UI is served from the same origin.*
 
 If you only need the API:
 ```bash
@@ -72,12 +77,12 @@ Tests cover the FastAPI routes, the background worker logic, and each TTS engine
 
 ## 🏗️ Architecture Overview
 - **FastAPI backend** (`backend/main.py`) exposes a REST API and serves the static files from `/frontend`.
-- **Background worker** (`backend/worker.py`) continuously syncs bookmarks from Raindrop.io using the `syncer.py` adapter.
+- **Background worker** (`backend/worker.py`) continuously syncs bookmarks from Raindrop.io and/or Instapaper using the `syncer.py` adapter.
 - **Database** (`backend/database.py`) uses **SQLite** via **SQLModel** (`SQLITE_DB_PATH` from `.env`).
 - **TTS Engine abstraction** (`backend/tts.py` + `backend/tts_engines/`):
-  - `edge_engine.py` – Microsoft Edge cloud TTS (default).
-  - `piper_engine.py` – Local open‑source Piper TTS.
-  - `pocket_engine.py` – PocketSphinx or custom engine.
+  - `edge_engine.py` – Microsoft Edge cloud TTS (default). Outputs `.mp3`.
+  - `piper_engine.py` – Local ONNX‑based Piper TTS. Splits long text into 2000‑character chunks at word boundaries. Uses `synthesize_wav()` (piper‑tts v1.4.2). Models auto‑downloaded via `download_voice()`. Outputs `.wav`.
+  - `pocket_engine.py` – Kyutai Labs Pocket TTS (CALM) using `moshi` TTSModel (1.6B params). Outputs `.wav` at 24000 Hz. Supports "default" voice (first available from `kyutai/tts-voices` HF repo) and "cloned" voice (uploaded 5s 24 kHz mono reference WAV). First use downloads ~3 GB model from HuggingFace. Automatically uses GPU (CUDA) when available.
 - **Data storage** (`/data`):
   - `audio/` – generated podcast audio files.
   - `db.sqlite` – SQLite DB.
@@ -91,11 +96,11 @@ Tests cover the FastAPI routes, the background worker logic, and each TTS engine
 | `RAINDROP_TOKEN` | Required token for Raindrop.io integration |
 | `BASE_URL` | Public URL for generated podcast feeds (default `http://localhost:8000`) |
 | `TTS_ENGINE` | Selected TTS backend (`edge`, `piper`, `pocket`) |
-| `DEFAULT_VOICE` | Voice identifier for the chosen engine (e.g., `en-US-AvaNeural`) |
+| `DEFAULT_VOICE` | Voice identifier for the chosen engine: Edge voices like `en-US-AvaNeural`; Piper voices like `en_US-lessac-medium` (auto‑downloaded on first use); Pocket voices use `default` (auto‑select first available) or `cloned` (reference WAV) |
 | `SQLITE_DB_PATH` | Path to SQLite DB (default `/data/db.sqlite`) |
 | `AUDIO_DIR` | Directory for generated audio files (default `/data/audio`) |
 | `MODELS_DIR` | Directory for local TTS models (default `/data/models`) |
-| `REFERENCE_WAV_PATH` | Optional reference audio for voice cloning |
+| `REFERENCE_WAV_PATH` | Path to reference WAV for Pocket TTS voice cloning (set automatically via UI upload at `/api/tts/reference`) |
 
 ---
 
@@ -127,7 +132,6 @@ Tests cover the FastAPI routes, the background worker logic, and each TTS engine
   - Improved configuration via `.env` and database‑backed settings.
   - Static frontend served by FastAPI with a clean UI.
 - Ongoing work:
-  - Finalizing Pocket TTS synthesis implementation.
   - Refining error handling and logging.
   - Enhancing documentation and developer onboarding.
 

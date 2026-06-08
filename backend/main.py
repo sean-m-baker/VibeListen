@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from backend.config import BASE_DIR, AUDIO_DIR, MODELS_DIR, REFERENCE_WAV_PATH
 from backend.database import init_db, get_session, Bookmark, Setting, get_setting, set_setting
-from backend.syncer import sync_raindrops
+from backend.syncer import sync_bookmarks
 from backend.rss_generator import generate_podcast_rss
 from backend.tts_engines import list_available_engines
 
@@ -53,9 +53,9 @@ def list_bookmarks(db: Session = Depends(get_session)):
 
 @app.post("/api/sync")
 def trigger_sync(db: Session = Depends(get_session)):
-    """Triggers synchronizing newest bookmarks from Raindrop.io as a background worker task."""
+    """Triggers synchronizing newest bookmarks from configured read-it-later services."""
     try:
-        new_count = sync_raindrops(db)
+        new_count = sync_bookmarks(db)
         return {"status": "success", "new_bookmarks_count": new_count}
     except Exception as e:
         logger.error(f"Sync failed: {e}")
@@ -107,7 +107,7 @@ def get_all_settings(db: Session = Depends(get_session)):
 @app.post("/api/settings")
 def update_setting(
     key: str = Form(...),
-    value: str = Form(...),
+    value: str = Form(default=""),
     section: str = Form("general"),
     db: Session = Depends(get_session),
 ):
@@ -169,13 +169,26 @@ async def upload_reference_audio(
     if not file.filename.endswith(".wav"):
         raise HTTPException(status_code=400, detail="Only .wav files are supported for reference audio.")
     
+    import wave
+    import io
+
     try:
         contents = await file.read()
+        with wave.open(io.BytesIO(contents), "rb") as w:
+            if w.getnchannels() != 1:
+                raise HTTPException(status_code=400, detail="Reference audio must be mono (1 channel).")
+            if w.getframerate() != 24000:
+                raise HTTPException(status_code=400, detail="Reference audio must be 24000 Hz sample rate.")
+            if w.getsampwidth() != 2:
+                raise HTTPException(status_code=400, detail="Reference audio must be 16-bit.")
+    except wave.Error:
+        raise HTTPException(status_code=400, detail="Invalid or corrupted WAV file.")
+
+    try:
         REFERENCE_WAV_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(REFERENCE_WAV_PATH, "wb") as f:
             f.write(contents)
         
-        # Update the setting to indicate a reference is available
         set_setting(db, "reference_audio", str(REFERENCE_WAV_PATH), section="tts")
         
         logger.info(f"Reference audio uploaded: {REFERENCE_WAV_PATH} ({len(contents)} bytes)")
