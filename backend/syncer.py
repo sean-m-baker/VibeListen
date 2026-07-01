@@ -65,6 +65,12 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
 
     items = data.get("items", [])
     logger.info(f"Successfully retrieved {len(items)} bookmarks from Raindrop account.")
+
+    # Single query: fetch all existing raindrop IDs to avoid N+1 lookups
+    existing_raindrop_ids = set(
+        session.exec(select(Bookmark.raindrop_id).where(Bookmark.raindrop_id.isnot(None)))
+    )
+
     new_bookmarks_count = 0
 
     for item in items:
@@ -73,10 +79,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
             logger.warning("Skipping parsed bookmark because it lacks a valid '_id'.")
             continue
             
-        # Check if this bookmark is already imported
-        statement = select(Bookmark).where(Bookmark.raindrop_id == raindrop_id)
-        existing = session.exec(statement).first()
-        if existing:
+        if raindrop_id in existing_raindrop_ids:
             logger.debug(f"Bookmark ID {raindrop_id} ('{item.get('title')}') already exists in SQLite. Skipping.")
             continue  # Already in database, skip
             
@@ -228,6 +231,12 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
         
     # Instapaper API returns list containing a mixture of objects.
     # Bookmark elements have type = 'bookmark'.
+
+    # Single query: fetch all existing instapaper IDs to avoid N+1 lookups
+    existing_instapaper_ids = set(
+        session.exec(select(Bookmark.instapaper_id).where(Bookmark.instapaper_id.isnot(None)))
+    )
+
     new_bookmarks_count = 0
     
     for item in payload:
@@ -236,10 +245,7 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
             if not bookmark_id:
                 continue
                 
-            # Check if this bookmark is already imported
-            statement = select(Bookmark).where(Bookmark.instapaper_id == bookmark_id)
-            existing = session.exec(statement).first()
-            if existing:
+            if bookmark_id in existing_instapaper_ids:
                 continue
                 
             # Parse added_at (Unix timestamp)

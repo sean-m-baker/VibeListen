@@ -5,14 +5,16 @@ import logging
 from typing import List, Dict, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Form, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
 from sqlmodel import Session, select
 
 from backend.config import BASE_DIR, AUDIO_DIR, AUDIO_CACHE_DIR, MODELS_DIR, REFERENCE_WAV_PATH, SECRET_KEY
 from backend.database import init_db, get_session, Bookmark, Setting, get_setting, set_setting
-from backend.auth import require_api_key, is_secret_key, secret_redactor, sanitize_filename
+from backend.auth import require_api_key, require_csrf_header, is_secret_key, secret_redactor, sanitize_filename
 from backend.syncer import sync_bookmarks
 from backend.rss_generator import generate_podcast_rss
 from backend.tts_engines import list_available_engines
@@ -32,6 +34,18 @@ app.add_middleware(
     allow_headers=["*", "X-API-Key", "X-Requested-By"],
     expose_headers=["X-API-Key"],
 )
+
+# Rate limiter — keyed by client IP
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+
+# Global handler — catch unhandled exceptions and return a generic response
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception on %s", request.url)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # ----------------- Static File Routing -----------------
 
@@ -143,20 +157,24 @@ def delete_bookmark(bookmark_id: int, db: Session = Depends(get_session), _auth:
     return {"status": "success", "message": f"Bookmark '{bookmark.title}' deleted."}
 
 @app.post("/api/sync")
-def trigger_sync(db: Session = Depends(get_session), _auth: None = Depends(require_api_key)):
+@limiter.limit("5/minute")
+def trigger_sync(request: Request, db: Session = Depends(get_session), _auth: None = Depends(require_api_key), _csrf: None = Depends(require_csrf_header)):
     """Triggers synchronizing newest bookmarks from configured read-it-later services."""
     try:
         new_count = sync_bookmarks(db)
         return {"status": "success", "new_bookmarks_count": new_count}
     except Exception as e:
-        logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Sync failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/generate/{bookmark_id}")
+@limiter.limit("30/minute")
 def trigger_generation(
+    request: Request,
     bookmark_id: int, 
     db: Session = Depends(get_session),
     _auth: None = Depends(require_api_key),
+    _csrf: None = Depends(require_csrf_header),
 ):
     """Queue a bookmark for processing by the standalone background worker."""
     bookmark = db.get(Bookmark, bookmark_id)
@@ -216,17 +234,41 @@ def get_all_settings(db: Session = Depends(get_session), _auth: None = Depends(r
 
 
 @app.post("/api/settings")
+@limiter.limit("30/minute")
 def update_setting(
+    request: Request,
     key: str = Form(...),
     value: str = Form(default=""),
     section: str = Form("general"),
     db: Session = Depends(get_session),
     _auth: None = Depends(require_api_key),
+    _csrf: None = Depends(require_csrf_header),
 ):
     """Create or update a single setting."""
     setting = set_setting(db, key, value, section)
     logger.info(f"Setting updated: [{section}] {key} = {value}")
     return {"status": "success", "section": setting.section, "key": setting.key, "value": setting.value}
+
+
+@app.post("/api/settings/bulk")
+@limiter.limit("30/minute")
+def bulk_update_settings(
+    request: Request,
+    payload: Dict[str, Dict[str, str]],
+    db: Session = Depends(get_session),
+    _auth: None = Depends(require_api_key),
+    _csrf: None = Depends(require_csrf_header),
+):
+    """Update multiple settings in a single request and transaction.
+    
+    Payload format: {"section": {"key": "value", ...}, ...}
+    """
+    for section, keys in payload.items():
+        for key, value in keys.items():
+            set_setting(db, key, value, section, commit=False)
+    db.commit()
+    logger.info(f"Bulk settings update: {sum(len(v) for v in payload.values())} values")
+    return {"status": "success"}
 
 
 # ----------------- TTS Engine API -----------------
@@ -276,10 +318,13 @@ MAX_REFERENCE_UPLOAD = 10 * 1024 * 1024  # 10 MB
 
 
 @app.post("/api/tts/reference")
+@limiter.limit("5/minute")
 async def upload_reference_audio(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
     _auth: None = Depends(require_api_key),
+    _csrf: None = Depends(require_csrf_header),
 ):
     """Upload a reference WAV file for voice cloning (Pocket TTS)."""
     if not file.filename.endswith(".wav"):
@@ -301,6 +346,11 @@ async def upload_reference_audio(
                 status_code=413,
                 detail=f"File too large. Maximum size is {MAX_REFERENCE_UPLOAD // (1024 * 1024)} MB.",
             )
+
+        # Validate RIFF WAV header before parsing the full structure
+        if contents[:4] != b"RIFF":
+            raise HTTPException(status_code=400, detail="File is not a valid WAV (missing RIFF header).")
+
         with wave.open(io.BytesIO(contents), "rb") as w:
             if w.getnchannels() != 1:
                 raise HTTPException(status_code=400, detail="Reference audio must be mono (1 channel).")
@@ -308,6 +358,8 @@ async def upload_reference_audio(
                 raise HTTPException(status_code=400, detail="Reference audio must be 24000 Hz sample rate.")
             if w.getsampwidth() != 2:
                 raise HTTPException(status_code=400, detail="Reference audio must be 16-bit.")
+            if w.getnframes() > 10_000_000:
+                raise HTTPException(status_code=400, detail="Reference audio has too many frames.")
     except wave.Error:
         raise HTTPException(status_code=400, detail="Invalid or corrupted WAV file.")
 
@@ -326,8 +378,8 @@ async def upload_reference_audio(
             "size": len(contents),
         }
     except Exception as e:
-        logger.error(f"Failed to upload reference audio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Failed to upload reference audio")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # Mount general static assets (js, css, images) under `/frontend`

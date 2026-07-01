@@ -68,3 +68,35 @@ class TestSecretEncryption:
         set_setting(session, "token_b", "value-b", section="test")
         assert get_setting(session, "token_a", section="test") == "value-a"
         assert get_setting(session, "token_b", section="test") == "value-b"
+
+
+class TestWALMode:
+    """SQLite WAL mode and busy timeout should be configured on the engine."""
+
+    def test_wal_pragma_applied(self, tmp_path):
+        """WAL mode pragma should set journal mode to 'wal'."""
+        import sqlite3
+        from backend.database import _set_sqlite_pragma
+
+        db_path = tmp_path / "test_wal.db"
+        conn = sqlite3.connect(str(db_path))
+        _set_sqlite_pragma(conn, None)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode")
+        mode = cursor.fetchone()[0]
+        assert mode == "wal", f"Expected 'wal', got '{mode}'"
+        conn.close()
+
+    def test_busy_timeout_applied(self, tmp_path):
+        """Busy timeout pragma should set timeout to 5000ms."""
+        import sqlite3
+        from backend.database import _set_sqlite_pragma
+
+        db_path = tmp_path / "test_timeout.db"
+        conn = sqlite3.connect(str(db_path))
+        _set_sqlite_pragma(conn, None)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA busy_timeout")
+        timeout = cursor.fetchone()[0]
+        assert timeout == 5000, f"Expected 5000, got {timeout}"
+        conn.close()

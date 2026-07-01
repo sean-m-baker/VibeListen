@@ -9,7 +9,7 @@ from backend.database import Setting
 from backend.main import app
 
 
-AUTH_HEADERS = {"X-API-Key": config.SECRET_KEY}
+AUTH_HEADERS = {"X-API-Key": config.SECRET_KEY, "X-Requested-By": "VibeListen"}
 
 
 @pytest.fixture(name="db_engine")
@@ -189,6 +189,19 @@ def test_upload_reference_audio_rejects_oversized(client, tmp_path):
     assert "File too large" in response.json()["detail"]
 
 
+def test_upload_reference_audio_rejects_bad_header(client, tmp_path):
+    """POST /api/tts/reference should reject .wav files with invalid RIFF header."""
+    bad_wav = tmp_path / "fake.wav"
+    # File has .wav extension but content doesn't start with RIFF
+    bad_wav.write_bytes(b"\x00\x00\x00\x00" + b"\x00" * 100)
+
+    with open(bad_wav, "rb") as f:
+        response = client.post("/api/tts/reference", files={"file": f}, headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    assert "RIFF" in response.json()["detail"]
+
+
 # --- Secret redaction tests ---
 
 def test_get_settings_redacts_secrets(client):
@@ -269,3 +282,66 @@ def test_delete_bookmark_sanitizes_traversal_audio_filename(client, db_engine):
     response = client.delete(f"/api/bookmarks/{bm_id}", headers=AUTH_HEADERS)
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+
+
+# --- Exception leak tests ---
+
+def test_sync_failure_does_not_leak_details(client):
+    """Triggering sync failure should not expose exception details in the response."""
+    from unittest.mock import patch
+    with patch("backend.main.sync_bookmarks", side_effect=RuntimeError("Internal: /etc/secrets/leaked")):
+        response = client.post("/api/sync", headers=AUTH_HEADERS)
+    assert response.status_code == 500
+    assert "Internal server error" in response.json()["detail"]
+    assert "/etc/secrets/" not in response.json()["detail"]
+
+
+# --- Rate limiting tests ---
+
+def test_rate_limit_sync_endpoint(client):
+    """POST /api/sync should return 429 after exceeding rate limit."""
+    from unittest.mock import patch
+
+    with patch("backend.main.sync_bookmarks", return_value=0):
+        # Exhaust the 5-per-minute limit
+        for _ in range(5):
+            response = client.post("/api/sync", headers=AUTH_HEADERS)
+            assert response.status_code == 200
+
+        # 6th request should be rate-limited
+        response = client.post("/api/sync", headers=AUTH_HEADERS)
+        assert response.status_code == 429
+
+
+# --- CSRF tests ---
+
+def test_post_rejects_missing_csrf_header(client):
+    """POST /api/sync should be rejected without X-Requested-By header."""
+    headers = {"X-API-Key": config.SECRET_KEY}
+    response = client.post("/api/sync", headers=headers)
+    assert response.status_code == 400
+    assert "CSRF" in response.json()["detail"]
+
+
+# --- Bulk settings tests ---
+
+def test_bulk_update_settings(client):
+    """POST /api/settings/bulk should update multiple settings in one request."""
+    payload = {
+        "tts": {"tts_engine": "piper", "tts_voice": "en_US-lessac-medium"},
+        "general": {"max_rss_items": "25"},
+    }
+    response = client.post(
+        "/api/settings/bulk",
+        json=payload,
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    # Verify all settings were stored
+    response = client.get("/api/settings", headers=AUTH_HEADERS)
+    data = response.json()
+    assert data["tts"]["tts_engine"] == "piper"
+    assert data["tts"]["tts_voice"] == "en_US-lessac-medium"
+    assert data["general"]["max_rss_items"] == "25"

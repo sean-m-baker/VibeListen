@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlmodel import Session, select, update
 
+from backend.auth import sanitize_filename
 from backend.config import AUDIO_DIR
 from backend.database import engine, init_db, Bookmark, get_setting
 from backend.parser import extract_article_content
@@ -106,7 +107,7 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
             session.add(bookmark)
             session.commit()
 
-            clean_text = extract_article_content(bookmark.url)
+            clean_text = await asyncio.to_thread(extract_article_content, bookmark.url)
             bookmark.clean_text = clean_text
             bookmark.status = "synthesizing"
             session.add(bookmark)
@@ -128,7 +129,12 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 session, "tts_voice", default=os.getenv("DEFAULT_VOICE", "en-US-GuyNeural"), section="tts"
             )
 
-            stem = f"raindrop_{bookmark.raindrop_id}" if bookmark.raindrop_id else f"instapaper_{bookmark.instapaper_id}"
+            if bookmark.raindrop_id:
+                stem = sanitize_filename(f"raindrop_{bookmark.raindrop_id}")
+            elif bookmark.instapaper_id:
+                stem = sanitize_filename(f"instapaper_{bookmark.instapaper_id}")
+            else:
+                stem = sanitize_filename(f"bookmark_{bookmark.id}")
             output_path = AUDIO_DIR / f"{stem}.mp3"
 
             stats = await generate_podcast_audio(

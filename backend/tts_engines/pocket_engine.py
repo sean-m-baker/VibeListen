@@ -39,6 +39,9 @@ class PocketEngine(BaseTTSEngine):
         self._tts: Any = None
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._lock = threading.Lock()
+        # Limit PyTorch CPU threads to prevent 100% core utilisation during
+        # inference, which starves the web server and launcher process.
+        torch.set_num_threads(max(1, os.cpu_count() // 2 or 1))
 
     def _load_model(self):
         if self._tts is not None:

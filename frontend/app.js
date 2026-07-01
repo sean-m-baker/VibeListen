@@ -17,6 +17,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (_API_KEY) {
             headers["X-API-Key"] = _API_KEY;
         }
+        if (options.method && options.method !== "GET") {
+            headers["X-Requested-By"] = "VibeListen";
+        }
         return fetch(url, { ...options, headers });
     }
 
@@ -685,22 +688,17 @@ document.addEventListener("DOMContentLoaded", () => {
         btnSaveSpeechSettings.textContent = "Saving...";
 
         try {
-            await apiFetch("/api/settings", {
+            // Single bulk request instead of 3 sequential POSTs
+            await apiFetch("/api/settings/bulk", {
                 method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "tts_engine", value: engine, section: "tts" })
-            });
-
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "tts_voice", value: voice, section: "tts" })
-            });
-
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "audio_bitrate", value: settingAudioBitrate.value, section: "tts" })
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    tts: {
+                        tts_engine: engine,
+                        tts_voice: voice,
+                        audio_bitrate: settingAudioBitrate.value,
+                    }
+                })
             });
 
             if (pendingReferenceFile && engine === "pocket") {
@@ -733,55 +731,27 @@ document.addEventListener("DOMContentLoaded", () => {
         btnSaveSyncSettings.textContent = "Saving...";
 
         try {
-            await apiFetch("/api/settings", {
+            // Single bulk request instead of 8 sequential POSTs
+            await apiFetch("/api/settings/bulk", {
                 method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "sync_service", value: settingSyncService.value, section: "general" })
-            });
-
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "max_rss_items", value: settingMaxRssItems.value, section: "general" })
-            });
-
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "raindrop_token", value: settingRaindropToken.value, section: "raindrop" })
-            });
-
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_consumer_key", value: settingInstapaperKey.value, section: "instapaper" })
-            });
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_consumer_secret", value: settingInstapaperSecret.value, section: "instapaper" })
-            });
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_username", value: settingInstapaperUsername.value, section: "instapaper" })
-            });
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_password", value: settingInstapaperPassword.value, section: "instapaper" })
-            });
-
-            // Clear cached OAuth tokens to force re-authentication
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_oauth_token", value: "", section: "instapaper" })
-            });
-            await apiFetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ key: "instapaper_oauth_token_secret", value: "", section: "instapaper" })
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    general: {
+                        sync_service: settingSyncService.value,
+                        max_rss_items: settingMaxRssItems.value,
+                    },
+                    raindrop: {
+                        raindrop_token: settingRaindropToken.value,
+                    },
+                    instapaper: {
+                        instapaper_consumer_key: settingInstapaperKey.value,
+                        instapaper_consumer_secret: settingInstapaperSecret.value,
+                        instapaper_username: settingInstapaperUsername.value,
+                        instapaper_password: settingInstapaperPassword.value,
+                        instapaper_oauth_token: "",
+                        instapaper_oauth_token_secret: "",
+                    }
+                })
             });
 
             showToast("✅ Sync settings saved!", "success");

@@ -1,6 +1,6 @@
 from typing import Optional, Generator
 from datetime import datetime, timezone
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, event
 from sqlmodel import SQLModel, Field, create_engine, Session
 from backend.config import SQLITE_DB_PATH
 
@@ -10,6 +10,15 @@ sqlite_url = f"sqlite:///{SQLITE_DB_PATH}"
 # check_same_thread=False is required for SQLite inside a multi-threaded web server like FastAPI
 connect_args = {"check_same_thread": False}
 engine = create_engine(sqlite_url, connect_args=connect_args)
+
+
+# Enable WAL mode and set a busy timeout for better concurrent read/write performance
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(db_connection, _connection_record):
+    cursor = db_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
 
 class Bookmark(SQLModel, table=True):
     """
@@ -28,7 +37,7 @@ class Bookmark(SQLModel, table=True):
     audio_filename: Optional[str] = None
     audio_duration: Optional[float] = None  # Duration in seconds
     audio_filesize: Optional[int] = None    # Size in bytes
-    status: str = Field(default="pending")  # pending, parsing, parsing_failed, synthesizing, completed, failed
+    status: str = Field(default="pending", index=True)  # pending, parsing, parsing_failed, synthesizing, completed, failed
     added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     generated_at: Optional[datetime] = None
 
@@ -61,7 +70,7 @@ def get_setting(db: Session, key: str, default: str = "", section: str = "genera
     return result.value
 
 
-def set_setting(db: Session, key: str, value: str, section: str = "general") -> Setting:
+def set_setting(db: Session, key: str, value: str, section: str = "general", commit: bool = True) -> Setting:
     """Upsert a setting value by key. Secret values are encrypted at rest."""
     from sqlalchemy import select
     from backend.auth import encrypt_secret, is_secret_key
@@ -74,13 +83,15 @@ def set_setting(db: Session, key: str, value: str, section: str = "general") -> 
     if existing:
         existing.value = value
         db.add(existing)
-        db.commit()
-        db.refresh(existing)
+        if commit:
+            db.commit()
+            db.refresh(existing)
         return existing
     new_setting = Setting(section=section, key=key, value=value)
     db.add(new_setting)
-    db.commit()
-    db.refresh(new_setting)
+    if commit:
+        db.commit()
+        db.refresh(new_setting)
     return new_setting
 
 
