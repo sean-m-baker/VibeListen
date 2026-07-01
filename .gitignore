@@ -15,12 +15,13 @@ env/
 .vscode/
 .idea/
 
-# Application files (local runtime data)
-data/db.sqlite
-data/audio/*.mp3
-data/audio/*.wav
-data/rss.xml
+# Application files — entire data/ directory is runtime-generated
+# (SQLite DB, audio files, TTS models, reference WAVs, transcoded cache)
+data/
 db.sqlite
 .env
 AGENTS.md
 .opencode/
+
+# Runtime logs
+start.log

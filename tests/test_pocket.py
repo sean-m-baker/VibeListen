@@ -37,32 +37,38 @@ def test_pocket_engine_init(mock_tts_model):
     assert engine._device in ("cpu", "cuda")
 
 
-def test_pocket_engine_voice_to_path_default(mock_tts_model):
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_default(mock_tts_model):
     from backend.tts_engines.pocket_engine import PocketEngine, hf_hub_download
     engine = PocketEngine()
     engine._tts = mock_tts_model
 
-    with patch.object(engine, "_available_voices", return_value=["alice"]):
+    async def mock_available_voices():
+        return ["alice"]
+
+    with patch.object(engine, "_available_voices", mock_available_voices):
         with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
             mock_dl.return_value = "/fake/path/to/alice.sig@0.safetensors"
-            result = engine._voice_to_path("default")
+            result = await engine._voice_to_path("default")
             assert result == "/fake/path/to/alice.sig@0.safetensors"
             mock_dl.assert_called_once_with(
                 repo_id="kyutai/tts-voices", filename="alice.sig@0.safetensors"
             )
 
 
-def test_pocket_engine_voice_to_path_cloned_missing_file(mock_tts_model):
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_cloned_missing_file(mock_tts_model):
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
     engine._tts = mock_tts_model
 
     with patch("backend.tts_engines.pocket_engine.REFERENCE_WAV_PATH", Path("/nonexistent/ref.wav")):
         with pytest.raises(RuntimeError, match="No reference audio uploaded"):
-            engine._voice_to_path("cloned")
+            await engine._voice_to_path("cloned")
 
 
-def test_pocket_engine_voice_to_path_cloned_valid(mock_tts_model, tmp_path):
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_cloned_valid(mock_tts_model, tmp_path):
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
     engine._tts = mock_tts_model
@@ -70,48 +76,60 @@ def test_pocket_engine_voice_to_path_cloned_valid(mock_tts_model, tmp_path):
     ref = tmp_path / "ref.wav"
     _make_valid_wav(ref, duration_sec=5.0, sample_rate=24000)
     with patch("backend.tts_engines.pocket_engine.REFERENCE_WAV_PATH", ref):
-        result = engine._voice_to_path("cloned")
+        result = await engine._voice_to_path("cloned")
     assert result == str(ref.resolve())
 
 
-def test_pocket_engine_voice_to_path_unknown(mock_tts_model):
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_unknown(mock_tts_model):
     from backend.tts_engines.pocket_engine import PocketEngine, hf_hub_download
     engine = PocketEngine()
     engine._tts = mock_tts_model
 
-    with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
-        mock_dl.side_effect = Exception("Not found")
-        with pytest.raises(RuntimeError, match="Voice 'nonexistent_voice' not found"):
-            engine._voice_to_path("nonexistent_voice")
+    async def mock_available_voices():
+        return []
+
+    with patch.object(engine, "_available_voices", mock_available_voices):
+        with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
+            mock_dl.side_effect = Exception("Not found")
+            with pytest.raises(RuntimeError, match="Voice 'nonexistent_voice' not found"):
+                await engine._voice_to_path("nonexistent_voice")
 
 
-def test_pocket_engine_voice_to_path_named_success(mock_tts_model):
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_named_success(mock_tts_model):
     from backend.tts_engines.pocket_engine import PocketEngine, hf_hub_download
     engine = PocketEngine()
     engine._tts = mock_tts_model
 
-    with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
-        mock_dl.return_value = "/fake/alice.safetensors"
-        result = engine._voice_to_path("alice")
+    async def mock_available_voices():
+        return []
+
+    with patch.object(engine, "_available_voices", mock_available_voices):
+        with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
+            mock_dl.return_value = "/fake/alice.safetensors"
+            result = await engine._voice_to_path("alice")
     assert result == "/fake/alice.safetensors"
     mock_dl.assert_called_once_with(repo_id="kyutai/tts-voices", filename="alice.sig@0.safetensors")
 
 
-def test_pocket_engine_voice_to_path_not_loaded():
+@pytest.mark.asyncio
+async def test_pocket_engine_voice_to_path_not_loaded():
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
     with pytest.raises(RuntimeError, match="Model not loaded"):
-        engine._voice_to_path("default")
+        await engine._voice_to_path("default")
 
 
-def test_available_voices_network_failure(mock_tts_model):
+@pytest.mark.asyncio
+async def test_available_voices_network_failure(mock_tts_model):
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
     engine._tts = mock_tts_model
 
     with patch("backend.tts_engines.pocket_engine.list_repo_files") as mock_list:
         mock_list.side_effect = Exception("Network error")
-        voices = engine._available_voices()
+        voices = await engine._available_voices()
     assert voices == []
 
 
@@ -122,7 +140,10 @@ async def test_synthesize_empty_result(mock_tts_model, tmp_path):
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
 
-    with patch.object(engine, "_voice_to_path", return_value="/fake/path"):
+    async def mock_vtp(*args):
+        return "/fake/path"
+
+    with patch.object(engine, "_voice_to_path", mock_vtp):
         with pytest.raises(RuntimeError, match="returned empty result"):
             await engine.synthesize(
                 text="Hello.", title="Test", author="Tester",
@@ -141,9 +162,13 @@ async def test_pocket_engine_synthesize_default_voice(mock_tts_model, tmp_path):
     from backend.tts_engines.pocket_engine import PocketEngine
     engine = PocketEngine()
 
-    with patch.object(engine, "_available_voices", return_value=["alice"]):
-        with patch("backend.tts_engines.pocket_engine.hf_hub_download") as mock_dl:
-            mock_dl.return_value = "/fake/alice.safetensors"
+    async def mock_voices():
+        return ["alice"]
+    async def mock_vtp(*a):
+        return "/fake/alice.safetensors"
+
+    with patch.object(engine, "_available_voices", mock_voices):
+        with patch.object(engine, "_voice_to_path", mock_vtp):
             output_path = str(tmp_path / "output.mp3")
             result = await engine.synthesize(
                 text="Hello world.",

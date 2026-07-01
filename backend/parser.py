@@ -1,6 +1,49 @@
+import logging
+import socket
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
 from readability import Document
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from backend.auth import is_internal_ip
+
+logger = logging.getLogger("VibeListen.Parser")
+
+# Reusable HTTP session with connection pooling (Keep-Alive)
+_HTTP_SESSION = requests.Session()
+
+
+def _validate_url(url: str) -> str:
+    """Validate *url* is safe to fetch — resolves DNS once to check for
+    internal IPs, then returns the original URL for the actual request.
+
+    We keep the original hostname in the request URL so that SSL/TLS
+    certificate verification works correctly (certificates are issued
+    for hostnames, not IP addresses). The TOCTOU window between the
+    validation resolution and the actual request is small; a full DNS
+    rebinding mitigation would require a custom transport adapter that
+    pins the resolved IP during the SSL handshake.
+    """
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("URL has no hostname")
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        addrs = socket.getaddrinfo(parsed.hostname, port)
+    except socket.gaierror:
+        raise ValueError(f"Could not resolve hostname: {parsed.hostname}")
+
+    resolved_ip = addrs[0][4][0]
+    if is_internal_ip(resolved_ip):
+        raise ValueError(f"Blocked request to internal/private IP: {resolved_ip}")
+
+    return url
+
 
 def extract_article_content(url: str) -> str:
     """
@@ -19,8 +62,17 @@ def extract_article_content(url: str) -> str:
     }
 
     try:
-        # Perform HTTP GET request to retrieve article HTML
-        response = requests.get(url, headers=headers, timeout=15)
+        _validate_url(url)
+
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, requests.exceptions.SSLError)),
+        )
+        def _fetch_url(url: str) -> requests.Response:
+            return _HTTP_SESSION.get(url, headers=headers, timeout=(10, 30))
+
+        response = _fetch_url(url)
         response.raise_for_status()
         
         # Support correct encoding detection

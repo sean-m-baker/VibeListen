@@ -3,13 +3,19 @@ import os
 import requests
 import urllib.parse
 from datetime import datetime, timezone
+
 from sqlmodel import Session, select
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from backend.config import RAINDROP_TOKEN
 from backend.database import Bookmark, get_setting, set_setting
 
 
 # Configure logger for the syncer module
 logger = logging.getLogger("VibeListen.Syncer")
+
+# Reusable HTTP session with connection pooling (Keep-Alive)
+_HTTP_SESSION = requests.Session()
 
 # Raindrop API base endpoints
 RAINDROP_API_URL = "https://api.raindrop.io/rest/v1/raindrops/0"
@@ -30,9 +36,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
         logger.error("Raindrop API token is not configured or empty.")
         raise ValueError("Raindrop API token is not configured.")
 
-    # Securely print a masked preview of the key to inspect loading issues
-    masked_token = token[:6] + "..." + token[-4:] if len(token) > 10 else "[TOO_SHORT]"
-    logger.info(f"API Token loaded successfully. Length: {len(token)} chars (Masked preview: {masked_token})")
+    logger.info(f"Raindrop API token configured (length: {len(token)} chars)")
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -45,17 +49,24 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
     }
 
     logger.info(f"Sending GET request to Raindrop API: {RAINDROP_API_URL}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    )
+    def _raindrop_api_call() -> requests.Response:
+        resp = _HTTP_SESSION.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        return resp
+
     try:
-        response = requests.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
+        response = _raindrop_api_call()
         logger.info(f"Raindrop API responded with HTTP Status Code: {response.status_code}")
-        
-        if response.status_code == 401:
-            logger.error("❌ HTTP 401 Unauthorized: The Raindrop API token is invalid or expired. Check your .env file.")
-            raise RuntimeError("Raindrop API token is Unauthorized (401). Please verify your token in the .env file.")
-            
-        response.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"HTTP request failed: {str(e)}")
+        if "401" in str(e):
+            raise RuntimeError("Raindrop API token is Unauthorized (401). Please verify your token in the .env file.")
         raise RuntimeError(f"Failed to connect to Raindrop API: {e}")
 
     data = response.json()
@@ -65,6 +76,12 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
 
     items = data.get("items", [])
     logger.info(f"Successfully retrieved {len(items)} bookmarks from Raindrop account.")
+
+    # Single query: fetch all existing raindrop IDs to avoid N+1 lookups
+    existing_raindrop_ids = set(
+        session.exec(select(Bookmark.raindrop_id).where(Bookmark.raindrop_id.isnot(None)))
+    )
+
     new_bookmarks_count = 0
 
     for item in items:
@@ -73,10 +90,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
             logger.warning("Skipping parsed bookmark because it lacks a valid '_id'.")
             continue
             
-        # Check if this bookmark is already imported
-        statement = select(Bookmark).where(Bookmark.raindrop_id == raindrop_id)
-        existing = session.exec(statement).first()
-        if existing:
+        if raindrop_id in existing_raindrop_ids:
             logger.debug(f"Bookmark ID {raindrop_id} ('{item.get('title')}') already exists in SQLite. Skipping.")
             continue  # Already in database, skip
             
@@ -131,7 +145,7 @@ def get_instapaper_oauth_tokens(
         "x_auth_mode": "client_auth"
     }
     logger.info("Sending xAuth request to Instapaper...")
-    response = requests.post(url, auth=auth, data=data, timeout=10)
+    response = _HTTP_SESSION.post(url, auth=auth, data=data, timeout=10)
     
     if response.status_code == 401:
         logger.error("❌ HTTP 401 Unauthorized: Invalid Instapaper credentials or API consumer keys.")
@@ -205,19 +219,27 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
     data = {"limit": limit}
     
     logger.info(f"Sending POST request to Instapaper API: {url}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    )
+    def _instapaper_api_call() -> requests.Response:
+        resp = _HTTP_SESSION.post(url, auth=auth, data=data, timeout=10)
+        resp.raise_for_status()
+        return resp
+
     try:
-        response = requests.post(url, auth=auth, data=data, timeout=10)
+        response = _instapaper_api_call()
         logger.info(f"Instapaper API responded with HTTP Status Code: {response.status_code}")
-        
-        if response.status_code == 401:
-            logger.error("❌ HTTP 401 Unauthorized: Instapaper tokens are invalid. Clearing stored credentials to trigger re-auth.")
+    except requests.RequestException as e:
+        logger.error(f"HTTP request failed: {str(e)}")
+        if "401" in str(e):
+            logger.error("Instapaper tokens invalid. Clearing stored credentials to trigger re-auth.")
             set_setting(session, "instapaper_oauth_token", "", section="instapaper")
             set_setting(session, "instapaper_oauth_token_secret", "", section="instapaper")
             raise RuntimeError("Instapaper API returned Unauthorized (401). Cached tokens cleared.")
-            
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"HTTP request failed: {str(e)}")
         raise RuntimeError(f"Failed to connect to Instapaper API: {e}")
         
     try:
@@ -228,6 +250,12 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
         
     # Instapaper API returns list containing a mixture of objects.
     # Bookmark elements have type = 'bookmark'.
+
+    # Single query: fetch all existing instapaper IDs to avoid N+1 lookups
+    existing_instapaper_ids = set(
+        session.exec(select(Bookmark.instapaper_id).where(Bookmark.instapaper_id.isnot(None)))
+    )
+
     new_bookmarks_count = 0
     
     for item in payload:
@@ -236,10 +264,7 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
             if not bookmark_id:
                 continue
                 
-            # Check if this bookmark is already imported
-            statement = select(Bookmark).where(Bookmark.instapaper_id == bookmark_id)
-            existing = session.exec(statement).first()
-            if existing:
+            if bookmark_id in existing_instapaper_ids:
                 continue
                 
             # Parse added_at (Unix timestamp)

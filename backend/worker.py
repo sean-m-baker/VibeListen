@@ -3,11 +3,13 @@ import logging
 import os
 import signal
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Session, select, update
 
-from backend.config import AUDIO_DIR
+from backend.auth import sanitize_filename
+from backend.config import AUDIO_DIR, AUDIO_CACHE_DIR
 from backend.database import engine, init_db, Bookmark, get_setting
 from backend.parser import extract_article_content
 from backend.tts import generate_podcast_audio
@@ -21,10 +23,6 @@ def _handle_signal(signum, frame):
     global _shutdown_requested
     logger.info(f"Received signal {signum}, scheduling graceful shutdown...")
     _shutdown_requested = True
-
-
-signal.signal(signal.SIGINT, _handle_signal)
-signal.signal(signal.SIGTERM, _handle_signal)
 
 
 def reset_stalled_bookmarks(session: Session) -> int:
@@ -44,8 +42,8 @@ def reset_stalled_bookmarks(session: Session) -> int:
             bookmark.status = "queued"
             session.add(bookmark)
             reset_count += 1
-        if stalled:
-            session.commit()
+    if reset_count:
+        session.commit()
     return reset_count
 
 
@@ -106,7 +104,7 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
             session.add(bookmark)
             session.commit()
 
-            clean_text = extract_article_content(bookmark.url)
+            clean_text = await asyncio.to_thread(extract_article_content, bookmark.url)
             bookmark.clean_text = clean_text
             bookmark.status = "synthesizing"
             session.add(bookmark)
@@ -128,7 +126,12 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 session, "tts_voice", default=os.getenv("DEFAULT_VOICE", "en-US-GuyNeural"), section="tts"
             )
 
-            stem = f"raindrop_{bookmark.raindrop_id}" if bookmark.raindrop_id else f"instapaper_{bookmark.instapaper_id}"
+            if bookmark.raindrop_id:
+                stem = sanitize_filename(f"raindrop_{bookmark.raindrop_id}")
+            elif bookmark.instapaper_id:
+                stem = sanitize_filename(f"instapaper_{bookmark.instapaper_id}")
+            else:
+                stem = sanitize_filename(f"bookmark_{bookmark.id}")
             output_path = AUDIO_DIR / f"{stem}.mp3"
 
             stats = await generate_podcast_audio(
@@ -140,15 +143,33 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 engine_name=tts_engine,
             )
 
-            if output_path.exists():
-                filename = f"{stem}.mp3"
-            else:
-                wav_path = output_path.with_suffix(".wav")
-                filename = f"{stem}.wav" if wav_path.exists() else f"{stem}.mp3"
-
-            bookmark.audio_filename = filename
+            actual_path = Path(stats["output_path"])
+            bookmark.audio_filename = actual_path.name
             bookmark.audio_filesize = stats["filesize"]
             bookmark.audio_duration = stats["duration"]
+
+            # Transcode WAV to MP3 in the background so the HTTP endpoint never
+            # needs to spawn ffmpeg on-demand (prevents transcoding DoS).
+            if actual_path.suffix == ".wav":
+                mp3_name = actual_path.stem + ".mp3"
+                mp3_path = AUDIO_CACHE_DIR / mp3_name
+                mp3_path.parent.mkdir(parents=True, exist_ok=True)
+                bitrate = get_setting(session, "audio_bitrate", "64", section="tts")
+                process = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-i", str(actual_path),
+                    "-codec:a", "libmp3lame",
+                    "-b:a", f"{bitrate}k",
+                    "-ar", "24000",
+                    "-ac", "1",
+                    str(mp3_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await process.communicate()
+                if process.returncode != 0:
+                    logger.error("ffmpeg transcoding failed for %s: %s",
+                                 actual_path, stderr.decode(errors="replace"))
+
             bookmark.status = "completed"
             bookmark.generated_at = datetime.now(timezone.utc)
             session.add(bookmark)
@@ -166,6 +187,11 @@ async def run_worker(poll_interval: float = 2.0) -> None:
     Main async poll loop. Claims queued bookmarks and processes them
     until graceful shutdown is requested.
     """
+    # Register signal handlers here (not at module level) to avoid installing
+    # them on import — e.g. when imported from tests or the FastAPI process
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
     logger.info("Worker starting up...")
     init_db()
 
@@ -177,14 +203,18 @@ async def run_worker(poll_interval: float = 2.0) -> None:
 
     logger.info(f"Worker polling every {poll_interval}s. Press Ctrl+C to exit.")
 
+    consecutive_idle = 0
     while not _shutdown_requested:
         try:
             with Session(engine) as session:
                 bookmark = claim_next_bookmark(session)
                 if bookmark:
+                    consecutive_idle = 0
                     await process_bookmark_pipeline_worker(bookmark.id)
                 else:
-                    await asyncio.sleep(poll_interval)
+                    consecutive_idle += 1
+                    sleep_time = min(poll_interval * (1.5 ** min(consecutive_idle, 5)), 30.0)
+                    await asyncio.sleep(sleep_time)
         except Exception:
             logger.exception("Worker: Unexpected error in main loop")
             await asyncio.sleep(poll_interval)

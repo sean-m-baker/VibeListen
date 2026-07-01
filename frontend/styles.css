@@ -532,6 +532,33 @@ body {
     box-shadow: 0 6px 15px rgba(168, 85, 247, 0.4);
 }
 
+/* Card Badge Group (badge + delete button) */
+.card-badge-group {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* Delete Button on Bookmark Cards */
+.btn-card-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--secondary);
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.3rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.btn-card-delete:hover {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.2);
+    color: var(--status-error-text);
+}
+
 /* Inline Audio Player Controls */
 .audio-player-inline {
     width: 100%;
@@ -951,3 +978,4 @@ audio::-webkit-media-controls-time-remaining-display {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-glow);
 }
+

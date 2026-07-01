@@ -2,8 +2,11 @@ import os
 import wave
 import io
 import logging
+import threading
 from typing import Dict, Any, List
 from pathlib import Path
+
+import aiofiles
 
 from backend.tts_engines.base import BaseTTSEngine
 from backend.config import MODELS_DIR
@@ -73,40 +76,45 @@ class PiperEngine(BaseTTSEngine):
                 "Piper TTS is not installed. Run: pip install -r requirements-piper.txt"
             )
         self._voice_cache: Dict[str, PiperVoice] = {}
+        self._voice_lock = threading.Lock()
 
     def _get_voice(self, voice_name: str) -> "PiperVoice":
-        """Load and cache a PiperVoice instance."""
+        """Load and cache a PiperVoice instance (thread-safe)."""
         if voice_name in self._voice_cache:
             return self._voice_cache[voice_name]
 
-        voice_dir = MODELS_DIR / "piper"
-        voice_dir.mkdir(parents=True, exist_ok=True)
+        with self._voice_lock:
+            if voice_name in self._voice_cache:
+                return self._voice_cache[voice_name]
 
-        model_path = voice_dir / f"{voice_name}.onnx"
-        config_path = voice_dir / f"{voice_name}.onnx.json"
+            voice_dir = MODELS_DIR / "piper"
+            voice_dir.mkdir(parents=True, exist_ok=True)
 
-        if not (model_path.exists() and config_path.exists()):
-            if download_voice is not None:
-                logger.info(f"Downloading Piper voice '{voice_name}'...")
-                download_voice(voice_name, voice_dir, force_redownload=False)
-            else:
+            model_path = voice_dir / f"{voice_name}.onnx"
+            config_path = voice_dir / f"{voice_name}.onnx.json"
+
+            if not (model_path.exists() and config_path.exists()):
+                if download_voice is not None:
+                    logger.info(f"Downloading Piper voice '{voice_name}'...")
+                    download_voice(voice_name, voice_dir, force_redownload=False)
+                else:
+                    raise RuntimeError(
+                        f"Piper voice '{voice_name}' not found and piper's download "
+                        f"utility is unavailable. Manually place the .onnx and .onnx.json "
+                        f"files in {voice_dir}."
+                    )
+
+            if not model_path.exists():
                 raise RuntimeError(
-                    f"Piper voice '{voice_name}' not found and piper's download "
-                    f"utility is unavailable. Manually place the .onnx and .onnx.json "
+                    f"Piper voice '{voice_name}' not found and could not be downloaded. "
+                    f"Check your internet connection or manually place the .onnx and .onnx.json "
                     f"files in {voice_dir}."
                 )
 
-        if not model_path.exists():
-            raise RuntimeError(
-                f"Piper voice '{voice_name}' not found and could not be downloaded. "
-                f"Check your internet connection or manually place the .onnx and .onnx.json "
-                f"files in {voice_dir}."
-            )
-
-        logger.info(f"Loading Piper voice: {model_path}")
-        voice = PiperVoice.load(str(model_path))
-        self._voice_cache[voice_name] = voice
-        return voice
+            logger.info(f"Loading Piper voice: {model_path}")
+            voice = PiperVoice.load(str(model_path))
+            self._voice_cache[voice_name] = voice
+            return voice
 
     def _synthesize_chunk(self, voice, text: str) -> bytes:
         """Synthesize a single text chunk and return the WAV bytes."""
@@ -192,8 +200,8 @@ class PiperEngine(BaseTTSEngine):
         combined_wav = _concatenate_wavs(wav_chunks)
 
         wav_path = str(Path(output_path).with_suffix(".wav"))
-        with open(wav_path, "wb") as f:
-            f.write(combined_wav)
+        async with aiofiles.open(wav_path, "wb") as f:
+            await f.write(combined_wav)
 
         filesize = os.path.getsize(wav_path)
         with wave.open(wav_path, "rb") as w:
@@ -201,4 +209,4 @@ class PiperEngine(BaseTTSEngine):
             rate = w.getframerate()
             estimated_duration = frames / rate
 
-        return {"filesize": filesize, "duration": estimated_duration}
+        return {"filesize": filesize, "duration": estimated_duration, "output_path": wav_path}

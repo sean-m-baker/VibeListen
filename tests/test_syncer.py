@@ -17,7 +17,7 @@ def session_fixture():
     with Session(engine) as session:
         yield session
 
-@patch("backend.syncer.requests.get")
+@patch("backend.syncer._HTTP_SESSION.get")
 @patch("backend.syncer.RAINDROP_TOKEN", "mock_developer_token")
 def test_sync_raindrops_successful_import(mock_get, session):
     # 1. Arrange: Setup simulated Raindrop.io JSON response
@@ -67,7 +67,7 @@ def test_sync_raindrops_successful_import(mock_get, session):
     assert duplicate_sync_count == 0
 
 
-@patch("backend.syncer.requests.post")
+@patch("backend.syncer._HTTP_SESSION.post")
 def test_get_instapaper_oauth_tokens_success(mock_post):
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -80,7 +80,7 @@ def test_get_instapaper_oauth_tokens_success(mock_post):
     mock_post.assert_called_once()
 
 
-@patch("backend.syncer.requests.post")
+@patch("backend.syncer._HTTP_SESSION.post")
 def test_get_instapaper_oauth_tokens_unauthorized(mock_post):
     mock_response = MagicMock()
     mock_response.status_code = 401
@@ -90,7 +90,7 @@ def test_get_instapaper_oauth_tokens_unauthorized(mock_post):
         get_instapaper_oauth_tokens("key", "secret", "user", "pass")
 
 
-@patch("backend.syncer.requests.post")
+@patch("backend.syncer._HTTP_SESSION.post")
 def test_sync_instapaper_successful_import(mock_post, session):
     # Setup settings
     set_setting(session, "instapaper_consumer_key", "key", section="instapaper")
@@ -124,7 +124,7 @@ def test_sync_instapaper_successful_import(mock_post, session):
     assert bookmarks[0].service == "instapaper"
 
 
-@patch("backend.syncer.requests.post")
+@patch("backend.syncer._HTTP_SESSION.post")
 def test_sync_instapaper_trigger_xauth_flow(mock_post, session):
     # Setup consumer credentials and username/password, but no OAuth tokens
     set_setting(session, "instapaper_consumer_key", "key", section="instapaper")
