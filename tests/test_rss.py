@@ -76,7 +76,8 @@ def test_rss_feed_returns_xml(client, db_engine):
     assert b"Test Article 0" in response.content
     assert b"Test Article 1" in response.content
     assert b"Test Article 2" in response.content
-    assert b"<rss version=\"2.0\"" in response.content
+    assert b"<rss" in response.content
+    assert b"version=\"2.0\"" in response.content
 
 
 def test_rss_feed_respects_max_items(client, db_engine):

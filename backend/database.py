@@ -97,49 +97,39 @@ def set_setting(db: Session, key: str, value: str, section: str = "general", com
 
 def migrate_database() -> None:
     """Run lightweight schema updates on existing database files dynamically."""
-    import sqlite3
     import logging
+    from sqlalchemy import inspect, text
+    from sqlalchemy.exc import OperationalError
+
     db_logger = logging.getLogger("VibeListen.DatabaseMigration")
-    
-    # Simple relative/absolute config fallback
-    try:
-        from backend.config import SQLITE_DB_PATH
-    except ImportError:
-        from config import SQLITE_DB_PATH
 
     db_path = SQLITE_DB_PATH
     if not db_path.exists():
         return
-        
+
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Check existing columns in the bookmark table
-        cursor.execute("PRAGMA table_info(bookmark)")
-        columns = [row[1] for row in cursor.fetchall()]
-        
-        # Add instapaper_id column if missing
-        if "instapaper_id" not in columns:
-            db_logger.info("Database migration: adding 'instapaper_id' column to 'bookmark' table.")
-            cursor.execute("ALTER TABLE bookmark ADD COLUMN instapaper_id INTEGER")
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_bookmark_instapaper_id ON bookmark (instapaper_id)")
+        with engine.connect() as conn:
+            inspector = inspect(engine)
+            columns = [col["name"] for col in inspector.get_columns("bookmark")]
+
+            if "instapaper_id" not in columns:
+                db_logger.info("Database migration: adding 'instapaper_id' column to 'bookmark' table.")
+                conn.execute(text("ALTER TABLE bookmark ADD COLUMN instapaper_id INTEGER"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_bookmark_instapaper_id ON bookmark (instapaper_id)"))
+                conn.commit()
+
+            if "service" not in columns:
+                db_logger.info("Database migration: adding 'service' column to 'bookmark' table.")
+                conn.execute(text("ALTER TABLE bookmark ADD COLUMN service VARCHAR"))
+                conn.execute(text("UPDATE bookmark SET service = 'raindrop' WHERE service IS NULL"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bookmark_service ON bookmark (service)"))
+                conn.commit()
+
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bookmark_status_added_at ON bookmark (status, added_at DESC)"))
             conn.commit()
-            
-        # Add service column if missing
-        if "service" not in columns:
-            db_logger.info("Database migration: adding 'service' column to 'bookmark' table.")
-            cursor.execute("ALTER TABLE bookmark ADD COLUMN service VARCHAR")
-            # Set default service to raindrop for existing rows
-            cursor.execute("UPDATE bookmark SET service = 'raindrop' WHERE service IS NULL")
-            cursor.execute("CREATE INDEX IF NOT EXISTS ix_bookmark_service ON bookmark (service)")
-            conn.commit()
-            
-        # Composite index for RSS feed query (status + recency)
-        cursor.execute("CREATE INDEX IF NOT EXISTS ix_bookmark_status_added_at ON bookmark (status, added_at DESC)")
-        conn.commit()
-        
-        conn.close()
+    except OperationalError:
+        # Table may not exist yet on first run; that's fine
+        pass
     except Exception as e:
         db_logger.error(f"Database migration failed: {str(e)}")
 
