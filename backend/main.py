@@ -1,16 +1,18 @@
 import os
+import hashlib
+import asyncio
 import logging
 from typing import List, Dict, Any
 from contextlib import asynccontextmanager
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, Response, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
-from backend.config import BASE_DIR, AUDIO_DIR, MODELS_DIR, REFERENCE_WAV_PATH
+from backend.config import BASE_DIR, AUDIO_DIR, AUDIO_CACHE_DIR, MODELS_DIR, REFERENCE_WAV_PATH, SECRET_KEY
 from backend.database import init_db, get_session, Bookmark, Setting, get_setting, set_setting
+from backend.auth import require_api_key, is_secret_key, secret_redactor, sanitize_filename
 from backend.syncer import sync_bookmarks
 from backend.rss_generator import generate_podcast_rss
 from backend.tts_engines import list_available_engines
@@ -21,13 +23,14 @@ logger = logging.getLogger("VibeListen")
 
 app = FastAPI(title="VibeListen", description="Personal Read-it-Later Podcast Server")
 
-# Configure CORS so dashboard can easily communicate with API from any client host
+# Configure CORS — allow any origin (personal tool, header-based auth)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key", "X-Requested-By"],
+    expose_headers=["X-API-Key"],
 )
 
 # ----------------- Static File Routing -----------------
@@ -38,21 +41,109 @@ def read_root():
     index_path = BASE_DIR / "frontend" / "index.html"
     if not os.path.exists(index_path):
         return {"message": "Welcome to VibeListen API! Dashboard index.html is not created yet."}
-    return FileResponse(index_path)
+    html = index_path.read_text(encoding="utf-8")
+    # Inject API key as a meta tag so the frontend JS can read it
+    meta_tag = f'<meta name="api-key" content="{SECRET_KEY}">'
+    html = html.replace("</head>", f"  {meta_tag}\n</head>")
+    return Response(content=html, media_type="text/html")
 
 # Mount audio storage directory under `/audio` to serve synthesized MP3 enclosures
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 
+# ----------------- Transcoded Audio for RSS -----------------
+
+@app.get("/rss-audio/{filename:path}")
+async def serve_rss_audio(filename: str, db: Session = Depends(get_session)):
+    """Serve WAV files transcoded to MP3 for mobile podcast app compatibility."""
+    if not filename.endswith(".mp3"):
+        raise HTTPException(status_code=400, detail="Only MP3 output is supported")
+
+    # Prevent path traversal — reject separators and parent-dir references
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    stem = filename[:-4]
+    wav_filename = stem + ".wav"
+    wav_path = (AUDIO_DIR / wav_filename).resolve()
+    if not str(wav_path).startswith(str(AUDIO_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid audio path")
+
+    if not wav_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    bitrate = get_setting(db, "audio_bitrate", "64", section="tts")
+    mp3_path = (AUDIO_CACHE_DIR / filename).resolve()
+    if not str(mp3_path).startswith(str(AUDIO_CACHE_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid cache path")
+
+    if not mp3_path.exists():
+        AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", str(wav_path),
+            "-codec:a", "libmp3lame",
+            "-b:a", f"{bitrate}k",
+            "-ar", "24000",
+            "-ac", "1",
+            str(mp3_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            error_msg = stderr.decode(errors="replace") if stderr else "Unknown error"
+            logger.error(f"ffmpeg transcoding failed for {wav_path}: {error_msg}")
+            raise HTTPException(status_code=500, detail="Audio transcoding failed")
+
+    return FileResponse(mp3_path, media_type="audio/mpeg", filename=filename)
+
+
 # ----------------- API Endpoints -----------------
 
 @app.get("/api/bookmarks", response_model=List[Bookmark])
-def list_bookmarks(db: Session = Depends(get_session)):
+def list_bookmarks(db: Session = Depends(get_session), _auth: None = Depends(require_api_key)):
     """Lists all bookmarks in the SQLite database, newest first."""
     statement = select(Bookmark).order_by(Bookmark.added_at.desc())
     return db.exec(statement).all()
 
+@app.delete("/api/bookmarks/{bookmark_id}")
+def delete_bookmark(bookmark_id: int, db: Session = Depends(get_session), _auth: None = Depends(require_api_key)):
+    """Deletes a bookmark and its associated audio files from disk."""
+    bookmark = db.get(Bookmark, bookmark_id)
+    if not bookmark:
+        raise HTTPException(status_code=404, detail="Bookmark not found")
+
+    # Remove audio file from disk if it exists
+    if bookmark.audio_filename:
+        safe_name = sanitize_filename(bookmark.audio_filename)
+        if safe_name != bookmark.audio_filename:
+            logger.warning(
+                f"Sanitized audio_filename for bookmark {bookmark_id}: "
+                f"'{bookmark.audio_filename}' -> '{safe_name}'"
+            )
+        audio_path = (AUDIO_DIR / safe_name).resolve()
+        if not str(audio_path).startswith(str(AUDIO_DIR.resolve())):
+            raise HTTPException(status_code=400, detail="Invalid audio filename")
+        if audio_path.exists():
+            audio_path.unlink()
+            logger.info(f"Deleted audio file: {audio_path}")
+
+        # Remove transcoded MP3 cache if it exists
+        if safe_name.endswith(".wav"):
+            mp3_name = safe_name.replace(".wav", ".mp3")
+            mp3_path = (AUDIO_CACHE_DIR / mp3_name).resolve()
+            if not str(mp3_path).startswith(str(AUDIO_CACHE_DIR.resolve())):
+                raise HTTPException(status_code=400, detail="Invalid cache filename")
+            if mp3_path.exists():
+                mp3_path.unlink()
+                logger.info(f"Deleted cached MP3: {mp3_path}")
+
+    db.delete(bookmark)
+    db.commit()
+    logger.info(f"Deleted bookmark ID {bookmark_id}: '{bookmark.title}'")
+    return {"status": "success", "message": f"Bookmark '{bookmark.title}' deleted."}
+
 @app.post("/api/sync")
-def trigger_sync(db: Session = Depends(get_session)):
+def trigger_sync(db: Session = Depends(get_session), _auth: None = Depends(require_api_key)):
     """Triggers synchronizing newest bookmarks from configured read-it-later services."""
     try:
         new_count = sync_bookmarks(db)
@@ -64,7 +155,8 @@ def trigger_sync(db: Session = Depends(get_session)):
 @app.post("/api/generate/{bookmark_id}")
 def trigger_generation(
     bookmark_id: int, 
-    db: Session = Depends(get_session)
+    db: Session = Depends(get_session),
+    _auth: None = Depends(require_api_key),
 ):
     """Queue a bookmark for processing by the standalone background worker."""
     bookmark = db.get(Bookmark, bookmark_id)
@@ -81,26 +173,45 @@ def trigger_generation(
     return {"status": "queued", "message": "Bookmark added to worker queue."}
 
 @app.get("/rss.xml")
-def get_rss_feed(db: Session = Depends(get_session)):
-    """Generates and serves the dynamic Podcast RSS XML feed."""
-    statement = select(Bookmark).where(Bookmark.status == "completed").order_by(Bookmark.added_at.desc())
+def get_rss_feed(request: Request, db: Session = Depends(get_session)):
+    """Generates and serves the dynamic Podcast RSS XML feed with caching support."""
+    max_items = int(get_setting(db, "max_rss_items", "100", section="general"))
+    bitrate = get_setting(db, "audio_bitrate", "64", section="tts")
+
+    statement = (
+        select(Bookmark)
+        .where(Bookmark.status == "completed")
+        .order_by(Bookmark.added_at.desc())
+        .limit(max_items)
+    )
     completed_bookmarks = db.exec(statement).all()
-    
-    rss_xml = generate_podcast_rss(completed_bookmarks)
-    return Response(content=rss_xml, media_type="application/xml")
+
+    # Compute ETag from the most recent bookmark's generated_at timestamp
+    etag = None
+    if completed_bookmarks:
+        latest = completed_bookmarks[0].generated_at or completed_bookmarks[0].added_at
+        etag = hashlib.md5(str(latest.timestamp()).encode()).hexdigest()
+
+    # Return 304 Not Modified if ETag matches
+    if etag and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+
+    rss_xml = generate_podcast_rss(completed_bookmarks, bitrate=bitrate)
+    headers = {"ETag": etag} if etag else {}
+    return Response(content=rss_xml, media_type="application/xml", headers=headers)
 
 
 # ----------------- Settings API -----------------
 
 @app.get("/api/settings")
-def get_all_settings(db: Session = Depends(get_session)):
+def get_all_settings(db: Session = Depends(get_session), _auth: None = Depends(require_api_key)):
     """Returns all user-configurable settings grouped by section."""
     settings = db.exec(select(Setting)).all()
     result: Dict[str, Dict[str, str]] = {}
     for s in settings:
         if s.section not in result:
             result[s.section] = {}
-        result[s.section][s.key] = s.value
+        result[s.section][s.key] = secret_redactor(s.value) if is_secret_key(s.key) else s.value
     return result
 
 
@@ -110,6 +221,7 @@ def update_setting(
     value: str = Form(default=""),
     section: str = Form("general"),
     db: Session = Depends(get_session),
+    _auth: None = Depends(require_api_key),
 ):
     """Create or update a single setting."""
     setting = set_setting(db, key, value, section)
@@ -120,13 +232,13 @@ def update_setting(
 # ----------------- TTS Engine API -----------------
 
 @app.get("/api/tts/engines")
-def get_tts_engines():
+def get_tts_engines(_auth: None = Depends(require_api_key)):
     """Lists all registered TTS engines and their installation status."""
     return {"engines": list_available_engines()}
 
 
 @app.get("/api/tts/voices/{engine}")
-def get_voices_for_engine(engine: str):
+def get_voices_for_engine(engine: str, _auth: None = Depends(require_api_key)):
     """Returns available voice options for a given TTS engine."""
     engine = engine.lower().strip()
     if engine == "edge":
@@ -160,20 +272,35 @@ def get_voices_for_engine(engine: str):
         raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
 
 
+MAX_REFERENCE_UPLOAD = 10 * 1024 * 1024  # 10 MB
+
+
 @app.post("/api/tts/reference")
 async def upload_reference_audio(
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
+    _auth: None = Depends(require_api_key),
 ):
     """Upload a reference WAV file for voice cloning (Pocket TTS)."""
     if not file.filename.endswith(".wav"):
         raise HTTPException(status_code=400, detail="Only .wav files are supported for reference audio.")
-    
+
+    if file.size and file.size > MAX_REFERENCE_UPLOAD:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_REFERENCE_UPLOAD // (1024 * 1024)} MB.",
+        )
+
     import wave
     import io
 
     try:
         contents = await file.read()
+        if len(contents) > MAX_REFERENCE_UPLOAD:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {MAX_REFERENCE_UPLOAD // (1024 * 1024)} MB.",
+            )
         with wave.open(io.BytesIO(contents), "rb") as w:
             if w.getnchannels() != 1:
                 raise HTTPException(status_code=400, detail="Reference audio must be mono (1 channel).")

@@ -15,11 +15,16 @@ def format_duration(seconds: float) -> str:
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
 
-def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
+def generate_podcast_rss(completed_bookmarks: List[Bookmark], bitrate: str = "64") -> str:
     """
     Constructs a valid iTunes-compliant Podcast RSS 2.0 XML string
     from a list of successfully synthesized bookmarks.
+    
+    For WAV audio files, enclosure URLs point to the transcoded MP3 endpoint
+    (`/rss-audio/`) for mobile compatibility. Original MP3 files point
+    directly to `/audio/`.
     """
+    bitrate_int = int(bitrate) if bitrate.isdigit() else 64
     base_url_escaped = escape(BASE_URL)
     
     # Core RSS Header
@@ -48,21 +53,26 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark]) -> str:
         if not item.audio_filename:
             continue
 
-        # Format absolute audio source link
-        audio_url = f"{BASE_URL}/audio/{item.audio_filename}"
+        duration_sec = item.audio_duration or 0.0
+        duration_str = format_duration(duration_sec)
+
+        # WAV files are served via transcoded MP3 endpoint; native MP3 served directly
+        if item.audio_filename.endswith(".wav"):
+            mp3_filename = item.audio_filename.replace(".wav", ".mp3")
+            audio_url = f"{BASE_URL}/rss-audio/{mp3_filename}"
+            mime_type = "audio/mpeg"
+            # Estimate compressed size: bitrate (kbps) * 1000 / 8 * duration
+            filesize = int((bitrate_int * 1000 / 8) * duration_sec) if duration_sec > 0 else (item.audio_filesize or 0)
+        else:
+            audio_url = f"{BASE_URL}/audio/{item.audio_filename}"
+            mime_type = "audio/mpeg"
+            filesize = item.audio_filesize or 0
+
         audio_url_escaped = escape(audio_url)
         
         # Build pubDate in RFC 822 standard format
         timestamp = item.added_at.timestamp()
         pub_date = formatdate(timestamp, usegmt=True)
-        
-        # Estimate/Fetch sizing info
-        filesize = item.audio_filesize or 0
-        duration_sec = item.audio_duration or 0.0
-        duration_str = format_duration(duration_sec)
-
-        # Determine MIME type from file extension
-        mime_type = "audio/wav" if item.audio_filename and item.audio_filename.endswith(".wav") else "audio/mpeg"
 
         # Truncate summary if too long for standard XML RSS descriptions
         short_summary = item.clean_text[:400] + "..." if item.clean_text and len(item.clean_text) > 400 else (item.clean_text or "")

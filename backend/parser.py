@@ -1,6 +1,26 @@
+import logging
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
 from readability import Document
+
+from backend.auth import is_internal_ip
+
+logger = logging.getLogger("VibeListen.Parser")
+
+
+def _validate_url(url: str) -> str:
+    """Validate *url* is safe to fetch — rejects non-HTTP schemes and internal IPs."""
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("URL has no hostname")
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    if is_internal_ip(parsed.hostname):
+        raise ValueError(f"Blocked request to internal/private IP: {parsed.hostname}")
+    return url
+
 
 def extract_article_content(url: str) -> str:
     """
@@ -19,6 +39,7 @@ def extract_article_content(url: str) -> str:
     }
 
     try:
+        _validate_url(url)
         # Perform HTTP GET request to retrieve article HTML
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()

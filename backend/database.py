@@ -50,14 +50,25 @@ class Setting(SQLModel, table=True):
 def get_setting(db: Session, key: str, default: str = "", section: str = "general") -> str:
     """Fetch a setting value by key, returning a default if not found."""
     from sqlalchemy import select
+    from backend.auth import decrypt_secret, is_secret_key
+
     statement = select(Setting).where(Setting.section == section, Setting.key == key)
     result = db.exec(statement).scalars().first()
-    return result.value if result else default
+    if not result:
+        return default
+    if is_secret_key(key):
+        return decrypt_secret(result.value)
+    return result.value
 
 
 def set_setting(db: Session, key: str, value: str, section: str = "general") -> Setting:
-    """Upsert a setting value by key."""
+    """Upsert a setting value by key. Secret values are encrypted at rest."""
     from sqlalchemy import select
+    from backend.auth import encrypt_secret, is_secret_key
+
+    if is_secret_key(key) and value:
+        value = encrypt_secret(value)
+
     statement = select(Setting).where(Setting.section == section, Setting.key == key)
     existing = db.exec(statement).scalars().first()
     if existing:
@@ -113,6 +124,10 @@ def migrate_database() -> None:
             cursor.execute("CREATE INDEX IF NOT EXISTS ix_bookmark_service ON bookmark (service)")
             conn.commit()
             
+        # Composite index for RSS feed query (status + recency)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_bookmark_status_added_at ON bookmark (status, added_at DESC)")
+        conn.commit()
+        
         conn.close()
     except Exception as e:
         db_logger.error(f"Database migration failed: {str(e)}")

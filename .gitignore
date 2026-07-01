@@ -24,3 +24,6 @@ db.sqlite
 .env
 AGENTS.md
 .opencode/
+
+# Runtime logs
+start.log

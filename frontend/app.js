@@ -9,6 +9,17 @@ document.addEventListener("DOMContentLoaded", () => {
     let searchQuery = "";
     let pollingInterval = null;
 
+    // Read API key from meta tag injected by server for authenticated requests
+    const _API_KEY = (document.querySelector('meta[name="api-key"]') || {}).content || "";
+
+    async function apiFetch(url, options = {}) {
+        const headers = options.headers || {};
+        if (_API_KEY) {
+            headers["X-API-Key"] = _API_KEY;
+        }
+        return fetch(url, { ...options, headers });
+    }
+
     // DOM Elements
     const btnSync = document.getElementById("btn-sync");
     const btnRss = document.getElementById("btn-rss");
@@ -34,7 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function fetchBookmarks(silent = false) {
         try {
-            const response = await fetch("/api/bookmarks");
+            const response = await apiFetch("/api/bookmarks");
             if (!response.ok) throw new Error("Network response was not ok");
             bookmarks = await response.json();
             renderStats();
@@ -53,7 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showToast("🔄 Syncing library with Raindrop.io...");
 
         try {
-            const response = await fetch("/api/sync", { method: "POST" });
+            const response = await apiFetch("/api/sync", { method: "POST" });
             const data = await response.json();
             if (response.ok && data.status === "success") {
                 const count = data.new_bookmarks_count;
@@ -78,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
     async function triggerGeneration(id) {
         showToast("Queuing article for speech generation...");
         try {
-            const response = await fetch(`/api/generate/${id}`, { method: "POST" });
+            const response = await apiFetch(`/api/generate/${id}`, { method: "POST" });
             const data = await response.json();
             if (response.ok) {
                 showToast("⚡ Article is now in the compilation queue!", "success");
@@ -89,6 +100,24 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error("Generation error:", error);
             showToast(`❌ Failed to trigger compilation: ${error.message}`, "error");
+        }
+    }
+
+    async function deleteBookmark(id) {
+        if (!confirm("Delete this bookmark and its audio file?")) return;
+        showToast("🗑️ Deleting bookmark...");
+        try {
+            const response = await apiFetch(`/api/bookmarks/${id}`, { method: "DELETE" });
+            const data = await response.json();
+            if (response.ok) {
+                showToast(`🗑️ Deleted: ${data.message}`, "success");
+                await fetchBookmarks();
+            } else {
+                throw new Error(data.detail || "Delete failed");
+            }
+        } catch (error) {
+            console.error("Delete error:", error);
+            showToast(`❌ Failed to delete: ${error.message}`, "error");
         }
     }
 
@@ -238,11 +267,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 `;
             }
 
+            const deleteBtnHtml = `<button class="btn-card-delete" data-id="${b.id}" title="Delete bookmark">
+                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>`;
+
             card.innerHTML = `
                 <div class="card-top">
                     <div class="card-meta">
                         <span class="card-domain">${b.domain}</span>
-                        ${badgeHtml}
+                        <span class="card-badge-group">${badgeHtml}${deleteBtnHtml}</span>
                     </div>
                     <h3 class="card-title">${escapeHTML(b.title)}</h3>
                     <p class="card-author">${b.author ? escapeHTML(b.author) : "No author snippet"}</p>
@@ -272,6 +305,14 @@ document.addEventListener("DOMContentLoaded", () => {
             btn.addEventListener("click", (e) => {
                 const id = e.currentTarget.getAttribute("data-id");
                 triggerGeneration(id);
+            });
+        });
+
+        // Add Delete Button event listeners
+        document.querySelectorAll(".btn-card-delete").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = e.currentTarget.getAttribute("data-id");
+                deleteBookmark(id);
             });
         });
     }
@@ -420,16 +461,12 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ----------------- Settings Modal -----------------
+    // ----------------- Settings DOM Elements -----------------
 
-    const btnSettings = document.getElementById("btn-settings");
-    const modalSettings = document.getElementById("modal-settings");
-    const btnSettingsClose = document.getElementById("btn-settings-close");
     const settingEngine = document.getElementById("setting-engine");
     const settingVoice = document.getElementById("setting-voice");
     const settingReference = document.getElementById("setting-reference");
     const referenceFilename = document.getElementById("reference-filename");
-    const btnSaveSettings = document.getElementById("btn-save-settings");
 
     const settingSyncService = document.getElementById("setting-sync-service");
     const settingRaindropToken = document.getElementById("setting-raindrop-token");
@@ -440,22 +477,54 @@ document.addEventListener("DOMContentLoaded", () => {
     const groupRaindrop = document.getElementById("group-raindrop");
     const groupInstapaper = document.getElementById("group-instapaper");
 
-    // Track the currently selected file for upload
+    const settingAudioBitrate = document.getElementById("setting-audio-bitrate");
+    const settingMaxRssItems = document.getElementById("setting-max-rss-items");
+
+    const btnSaveSpeechSettings = document.getElementById("btn-save-speech-settings");
+    const btnSaveSyncSettings = document.getElementById("btn-save-sync-settings");
+
     let pendingReferenceFile = null;
 
-    // ----------------- Settings Tab Switching -----------------
+    // ----------------- Speech Modal Open/Close -----------------
 
-    const settingsTabBtns = document.querySelectorAll(".settings-tab");
-    const settingsTabContents = document.querySelectorAll(".settings-tab-content");
+    const btnSpeechSettings = document.getElementById("btn-speech-settings");
+    const modalSpeech = document.getElementById("modal-speech");
+    const btnSpeechModalClose = document.getElementById("btn-speech-modal-close");
 
-    settingsTabBtns.forEach(btn => {
-        btn.addEventListener("click", () => {
-            const tab = btn.getAttribute("data-settings-tab");
-            settingsTabBtns.forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-            settingsTabContents.forEach(c => c.classList.remove("active"));
-            document.getElementById(`settings-${tab}`).classList.add("active");
-        });
+    function openSpeechModal() {
+        modalSpeech.classList.remove("hidden");
+        loadSpeechSettings();
+    }
+
+    function closeSpeechModal() {
+        modalSpeech.classList.add("hidden");
+    }
+
+    btnSpeechSettings.addEventListener("click", openSpeechModal);
+    btnSpeechModalClose.addEventListener("click", closeSpeechModal);
+    modalSpeech.addEventListener("click", (e) => {
+        if (e.target === modalSpeech) closeSpeechModal();
+    });
+
+    // ----------------- Sync Modal Open/Close -----------------
+
+    const btnSyncSettings = document.getElementById("btn-sync-settings");
+    const modalSync = document.getElementById("modal-sync");
+    const btnSyncModalClose = document.getElementById("btn-sync-modal-close");
+
+    function openSyncModal() {
+        modalSync.classList.remove("hidden");
+        loadSyncSettings();
+    }
+
+    function closeSyncModal() {
+        modalSync.classList.add("hidden");
+    }
+
+    btnSyncSettings.addEventListener("click", openSyncModal);
+    btnSyncModalClose.addEventListener("click", closeSyncModal);
+    modalSync.addEventListener("click", (e) => {
+        if (e.target === modalSync) closeSyncModal();
     });
 
     // ----------------- Integration Toggle -----------------
@@ -477,11 +546,11 @@ document.addEventListener("DOMContentLoaded", () => {
         toggleIntegrationFields(settingSyncService.value);
     });
 
-    // ----------------- Load & Save Settings -----------------
+    // ----------------- Load Speech Settings -----------------
 
-    async function loadSettings() {
+    async function loadSpeechSettings() {
         try {
-            const response = await fetch("/api/settings");
+            const response = await apiFetch("/api/settings");
             if (!response.ok) return;
             const settings = await response.json();
             const ttsSettings = settings.tts || {};
@@ -497,31 +566,15 @@ document.addEventListener("DOMContentLoaded", () => {
             if (ttsSettings.tts_voice) {
                 settingVoice.value = ttsSettings.tts_voice;
             }
-
-            // General settings (Sync Service)
-            const generalSettings = settings.general || {};
-            settingSyncService.value = generalSettings.sync_service || "both";
-
-            // Raindrop settings
-            const raindropSettings = settings.raindrop || {};
-            settingRaindropToken.value = raindropSettings.raindrop_token || "";
-
-            // Instapaper settings
-            const instapaperSettings = settings.instapaper || {};
-            settingInstapaperKey.value = instapaperSettings.instapaper_consumer_key || "";
-            settingInstapaperSecret.value = instapaperSettings.instapaper_consumer_secret || "";
-            settingInstapaperUsername.value = instapaperSettings.instapaper_username || "";
-            settingInstapaperPassword.value = instapaperSettings.instapaper_password || "";
-
-            toggleIntegrationFields(settingSyncService.value);
+            settingAudioBitrate.value = ttsSettings.audio_bitrate || "64";
         } catch (error) {
-            console.error("Failed to load settings:", error);
+            console.error("Failed to load speech settings:", error);
         }
     }
 
     async function populateVoices(engine) {
         try {
-            const response = await fetch(`/api/tts/voices/${engine}`);
+            const response = await apiFetch(`/api/tts/voices/${engine}`);
             if (!response.ok) throw new Error("Failed to fetch voices");
             const data = await response.json();
 
@@ -548,22 +601,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    btnSettings.addEventListener("click", () => {
-        modalSettings.classList.remove("hidden");
-        loadSettings();
-    });
-
-    btnSettingsClose.addEventListener("click", () => {
-        modalSettings.classList.add("hidden");
-    });
-
-    modalSettings.addEventListener("click", (e) => {
-        if (e.target === modalSettings) modalSettings.classList.add("hidden");
-    });
-
     async function disableUnavailableEngines() {
         try {
-            const response = await fetch("/api/tts/engines");
+            const response = await apiFetch("/api/tts/engines");
             if (!response.ok) return;
             const data = await response.json();
             const engineSelect = document.getElementById("setting-engine");
@@ -602,132 +642,71 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    btnSaveSettings.addEventListener("click", async () => {
+    // ----------------- Load Sync Settings -----------------
+
+    async function loadSyncSettings() {
+        try {
+            const response = await apiFetch("/api/settings");
+            if (!response.ok) return;
+            const settings = await response.json();
+
+            const generalSettings = settings.general || {};
+            settingSyncService.value = generalSettings.sync_service || "both";
+
+            const raindropSettings = settings.raindrop || {};
+            settingRaindropToken.value = raindropSettings.raindrop_token || "";
+
+            const instapaperSettings = settings.instapaper || {};
+            settingInstapaperKey.value = instapaperSettings.instapaper_consumer_key || "";
+            settingInstapaperSecret.value = instapaperSettings.instapaper_consumer_secret || "";
+            settingInstapaperUsername.value = instapaperSettings.instapaper_username || "";
+            settingInstapaperPassword.value = instapaperSettings.instapaper_password || "";
+
+            settingMaxRssItems.value = generalSettings.max_rss_items || "100";
+
+            toggleIntegrationFields(settingSyncService.value);
+        } catch (error) {
+            console.error("Failed to load sync settings:", error);
+        }
+    }
+
+    // ----------------- Save Speech Settings -----------------
+
+    btnSaveSpeechSettings.addEventListener("click", async () => {
         const engine = settingEngine.value;
         const voice = settingVoice.value;
 
         if (!voice) {
-            settingsTabBtns.forEach(b => b.classList.remove("active"));
-            document.querySelector('.settings-tab[data-settings-tab="speech"]').classList.add("active");
-            settingsTabContents.forEach(c => c.classList.remove("active"));
-            document.getElementById("settings-speech").classList.add("active");
             showToast("❌ Please select a voice.", "error");
             return;
         }
 
-        btnSaveSettings.disabled = true;
-        btnSaveSettings.textContent = "Saving...";
+        btnSaveSpeechSettings.disabled = true;
+        btnSaveSpeechSettings.textContent = "Saving...";
 
         try {
-            // Save engine
-            await fetch("/api/settings", {
+            await apiFetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "tts_engine",
-                    value: engine,
-                    section: "tts"
-                })
+                body: new URLSearchParams({ key: "tts_engine", value: engine, section: "tts" })
             });
 
-            // Save voice
-            await fetch("/api/settings", {
+            await apiFetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "tts_voice",
-                    value: voice,
-                    section: "tts"
-                })
+                body: new URLSearchParams({ key: "tts_voice", value: voice, section: "tts" })
             });
 
-            // Save Sync Service
-            await fetch("/api/settings", {
+            await apiFetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "sync_service",
-                    value: settingSyncService.value,
-                    section: "general"
-                })
+                body: new URLSearchParams({ key: "audio_bitrate", value: settingAudioBitrate.value, section: "tts" })
             });
 
-            // Save Raindrop Token
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "raindrop_token",
-                    value: settingRaindropToken.value,
-                    section: "raindrop"
-                })
-            });
-
-            // Save Instapaper consumer credentials
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_consumer_key",
-                    value: settingInstapaperKey.value,
-                    section: "instapaper"
-                })
-            });
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_consumer_secret",
-                    value: settingInstapaperSecret.value,
-                    section: "instapaper"
-                })
-            });
-
-            // Save Instapaper username and password
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_username",
-                    value: settingInstapaperUsername.value,
-                    section: "instapaper"
-                })
-            });
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_password",
-                    value: settingInstapaperPassword.value,
-                    section: "instapaper"
-                })
-            });
-
-            // Clear cached Instapaper OAuth tokens to force re-authentication with new credentials
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_oauth_token",
-                    value: "",
-                    section: "instapaper"
-                })
-            });
-            await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    key: "instapaper_oauth_token_secret",
-                    value: "",
-                    section: "instapaper"
-                })
-            });
-
-            // Upload reference audio if selected
             if (pendingReferenceFile && engine === "pocket") {
                 const formData = new FormData();
                 formData.append("file", pendingReferenceFile);
-                const uploadResponse = await fetch("/api/tts/reference", {
+                const uploadResponse = await apiFetch("/api/tts/reference", {
                     method: "POST",
                     body: formData
                 });
@@ -736,18 +715,88 @@ document.addEventListener("DOMContentLoaded", () => {
                 referenceFilename.textContent = "";
             }
 
-            showToast("✅ Settings saved! They will take effect on the next synthesis.", "success");
-            modalSettings.classList.add("hidden");
+            showToast("✅ Speech settings saved! They will take effect on the next synthesis.", "success");
+            closeSpeechModal();
         } catch (error) {
-            console.error("Save settings error:", error);
-            showToast("❌ Failed to save settings.", "error");
+            console.error("Save speech settings error:", error);
+            showToast("❌ Failed to save speech settings.", "error");
         } finally {
-            btnSaveSettings.disabled = false;
-            btnSaveSettings.textContent = "Save Settings";
+            btnSaveSpeechSettings.disabled = false;
+            btnSaveSpeechSettings.textContent = "Save Speech Settings";
         }
     });
 
-    // Initialize Application
+    // ----------------- Save Sync Settings -----------------
+
+    btnSaveSyncSettings.addEventListener("click", async () => {
+        btnSaveSyncSettings.disabled = true;
+        btnSaveSyncSettings.textContent = "Saving...";
+
+        try {
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "sync_service", value: settingSyncService.value, section: "general" })
+            });
+
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "max_rss_items", value: settingMaxRssItems.value, section: "general" })
+            });
+
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "raindrop_token", value: settingRaindropToken.value, section: "raindrop" })
+            });
+
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_consumer_key", value: settingInstapaperKey.value, section: "instapaper" })
+            });
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_consumer_secret", value: settingInstapaperSecret.value, section: "instapaper" })
+            });
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_username", value: settingInstapaperUsername.value, section: "instapaper" })
+            });
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_password", value: settingInstapaperPassword.value, section: "instapaper" })
+            });
+
+            // Clear cached OAuth tokens to force re-authentication
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_oauth_token", value: "", section: "instapaper" })
+            });
+            await apiFetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: "instapaper_oauth_token_secret", value: "", section: "instapaper" })
+            });
+
+            showToast("✅ Sync settings saved!", "success");
+            closeSyncModal();
+        } catch (error) {
+            console.error("Save sync settings error:", error);
+            showToast("❌ Failed to save sync settings.", "error");
+        } finally {
+            btnSaveSyncSettings.disabled = false;
+            btnSaveSyncSettings.textContent = "Save Sync Settings";
+        }
+    });
+
+    // ----------------- Initialize Application -----------------
+
     fetchBookmarks();
 });
 
