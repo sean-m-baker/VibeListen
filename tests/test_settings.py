@@ -286,14 +286,23 @@ def test_delete_bookmark_sanitizes_traversal_audio_filename(client, db_engine):
 
 # --- Exception leak tests ---
 
-def test_sync_failure_does_not_leak_details(client):
-    """Triggering sync failure should not expose exception details in the response."""
+def test_sync_failure_returns_user_facing_error(client):
+    """Sync RuntimeError messages (invalid token, missing config) are user-facing."""
     from unittest.mock import patch
-    with patch("backend.main.sync_bookmarks", side_effect=RuntimeError("Internal: /etc/secrets/leaked")):
+    with patch("backend.main.sync_bookmarks", side_effect=RuntimeError("Raindrop API token is Unauthorized")):
+        response = client.post("/api/sync", headers=AUTH_HEADERS)
+    assert response.status_code == 500
+    assert "Unauthorized" in response.json()["detail"]
+
+
+def test_sync_failure_hides_internal_error(client):
+    """Non-RuntimeError exceptions return a generic message, hiding internals."""
+    from unittest.mock import patch
+    with patch("backend.main.sync_bookmarks", side_effect=KeyError("internal_key")):
         response = client.post("/api/sync", headers=AUTH_HEADERS)
     assert response.status_code == 500
     assert "Internal server error" in response.json()["detail"]
-    assert "/etc/secrets/" not in response.json()["detail"]
+    assert "internal_key" not in response.json()["detail"]
 
 
 # --- Rate limiting tests ---

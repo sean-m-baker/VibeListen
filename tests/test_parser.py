@@ -23,22 +23,10 @@ class TestValidateURL:
     """SSRF validation — _validate_url rejects internal/private destinations."""
 
     def test_valid_external_url(self):
-        scheme, ip, host, path = _validate_url("https://example.com/article")
-        assert scheme == "https"
-        assert ip == "93.184.216.34"
-        assert host == "example.com"
-        assert path == "/article"
+        assert _validate_url("https://example.com/article") == "https://example.com/article"
 
     def test_valid_http_url(self):
-        scheme, ip, host, path = _validate_url("http://example.com")
-        assert scheme == "http"
-        assert ip == "93.184.216.34"
-        assert host == "example.com"
-        assert path == "/"
-
-    def test_url_with_query_preserved(self):
-        _, _, _, path = _validate_url("http://example.com/page?q=1&r=2")
-        assert path == "/page?q=1&r=2"
+        assert _validate_url("http://example.com") == "http://example.com"
 
     def test_no_hostname_raises(self):
         with pytest.raises(ValueError, match="no hostname"):
@@ -73,10 +61,7 @@ class TestValidateURL:
             _validate_url("http://169.254.169.254/latest/meta-data/")
 
     def test_hostname_resolves_to_public_passes(self):
-        scheme, ip, host, _ = _validate_url("http://example.com")
-        assert scheme == "http"
-        assert ip == "93.184.216.34"
-        assert host == "example.com"
+        assert _validate_url("http://example.com") == "http://example.com"
 
     def test_unresolvable_hostname_raises(self):
         with pytest.raises(ValueError, match="Could not resolve"):
