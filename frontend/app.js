@@ -670,8 +670,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btnSaveSpeechSettings.textContent = "Saving...";
 
         try {
-            // Single bulk request instead of 3 sequential POSTs
-            await apiFetch("/api/settings/bulk", {
+            const speechResponse = await apiFetch("/api/settings/bulk", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -682,6 +681,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 })
             });
+            if (!speechResponse.ok) {
+                const err = await speechResponse.json().catch(() => ({}));
+                throw new Error(err.detail || "Speech settings save failed");
+            }
 
             if (pendingReferenceFile && engine === "pocket") {
                 const formData = new FormData();
@@ -713,8 +716,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btnSaveSyncSettings.textContent = "Saving...";
 
         try {
-            // Single bulk request instead of 8 sequential POSTs
-            await apiFetch("/api/settings/bulk", {
+            const syncResponse = await apiFetch("/api/settings/bulk", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -735,6 +737,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 })
             });
+            if (!syncResponse.ok) {
+                const err = await syncResponse.json().catch(() => ({}));
+                throw new Error(err.detail || "Sync settings save failed");
+            }
 
             showToast("✅ Sync settings saved!", "success");
             closeSyncModal();

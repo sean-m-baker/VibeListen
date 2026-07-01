@@ -143,7 +143,13 @@ def trigger_sync(request: Request, db: Session = Depends(get_session), _auth: No
         return {"status": "success", "new_bookmarks_count": new_count}
     except Exception as e:
         logger.exception("Sync failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Return user-facing sync errors (invalid token, missing config, etc.)
+        # while hiding unexpected internal details behind a generic message.
+        if isinstance(e, (ValueError, RuntimeError)):
+            detail = str(e)
+        else:
+            detail = "Internal server error"
+        raise HTTPException(status_code=500, detail=detail)
 
 @app.post("/api/generate/{bookmark_id}")
 @limiter.limit("30/minute")

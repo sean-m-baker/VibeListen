@@ -17,6 +17,8 @@ env/
 
 # Application files (local runtime data)
 data/db.sqlite
+data/db.sqlite-shm
+data/db.sqlite-wal
 data/audio/*.mp3
 data/audio/*.wav
 data/rss.xml
