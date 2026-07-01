@@ -83,7 +83,8 @@ def generate_podcast_rss(completed_bookmarks: List[Bookmark], bitrate: str = "64
         xml.append(f'      <description>{escape(short_summary)}</description>')
         xml.append(f'      <pubDate>{pub_date}</pubDate>')
         xml.append(f'      <enclosure url="{audio_url_escaped}" type="{mime_type}" length="{filesize}" />')
-        xml.append(f'      <guid isPermaLink="false">VibeListen_{item.raindrop_id}</guid>')
+        guid = item.raindrop_id or item.instapaper_id or item.id
+        xml.append(f'      <guid isPermaLink="false">VibeListen_{guid}</guid>')
         xml.append(f'      <itunes:duration>{duration_str}</itunes:duration>')
         xml.append('      <itunes:explicit>no</itunes:explicit>')
         xml.append('    </item>')

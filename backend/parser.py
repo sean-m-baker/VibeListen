@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 from readability import Document
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from backend.auth import is_internal_ip
 
@@ -40,8 +41,16 @@ def extract_article_content(url: str) -> str:
 
     try:
         _validate_url(url)
-        # Perform HTTP GET request to retrieve article HTML
-        response = requests.get(url, headers=headers, timeout=15)
+
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+        )
+        def _fetch_url(url: str) -> requests.Response:
+            return requests.get(url, headers=headers, timeout=(10, 30))
+
+        response = _fetch_url(url)
         response.raise_for_status()
         
         # Support correct encoding detection

@@ -5,6 +5,7 @@ from sqlalchemy.pool import StaticPool
 
 import backend.database as db_module
 from backend.database import Bookmark
+from backend.config import AUDIO_DIR
 
 
 @pytest.fixture(name="db_engine")
@@ -108,7 +109,8 @@ async def test_worker_pipeline_success(worker, db_engine):
 
     with patch("backend.worker.extract_article_content", return_value="Clean text"):
         with patch("backend.worker.generate_podcast_audio", new_callable=AsyncMock) as mock_tts:
-            mock_tts.return_value = {"filesize": 1234, "duration": 60.0}
+            output_path = str(AUDIO_DIR / "raindrop_1.mp3")
+            mock_tts.return_value = {"filesize": 1234, "duration": 60.0, "output_path": output_path}
 
             await worker.process_bookmark_pipeline_worker(bm_id)
 

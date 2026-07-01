@@ -3,7 +3,10 @@ import os
 import requests
 import urllib.parse
 from datetime import datetime, timezone
+
 from sqlmodel import Session, select
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from backend.config import RAINDROP_TOKEN
 from backend.database import Bookmark, get_setting, set_setting
 
@@ -30,9 +33,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
         logger.error("Raindrop API token is not configured or empty.")
         raise ValueError("Raindrop API token is not configured.")
 
-    # Securely print a masked preview of the key to inspect loading issues
-    masked_token = token[:6] + "..." + token[-4:] if len(token) > 10 else "[TOO_SHORT]"
-    logger.info(f"API Token loaded successfully. Length: {len(token)} chars (Masked preview: {masked_token})")
+    logger.info(f"Raindrop API token configured (length: {len(token)} chars)")
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -45,17 +46,24 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
     }
 
     logger.info(f"Sending GET request to Raindrop API: {RAINDROP_API_URL}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    )
+    def _raindrop_api_call() -> requests.Response:
+        resp = requests.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        return resp
+
     try:
-        response = requests.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
+        response = _raindrop_api_call()
         logger.info(f"Raindrop API responded with HTTP Status Code: {response.status_code}")
-        
-        if response.status_code == 401:
-            logger.error("❌ HTTP 401 Unauthorized: The Raindrop API token is invalid or expired. Check your .env file.")
-            raise RuntimeError("Raindrop API token is Unauthorized (401). Please verify your token in the .env file.")
-            
-        response.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"HTTP request failed: {str(e)}")
+        if "401" in str(e):
+            raise RuntimeError("Raindrop API token is Unauthorized (401). Please verify your token in the .env file.")
         raise RuntimeError(f"Failed to connect to Raindrop API: {e}")
 
     data = response.json()
@@ -208,19 +216,27 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
     data = {"limit": limit}
     
     logger.info(f"Sending POST request to Instapaper API: {url}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    )
+    def _instapaper_api_call() -> requests.Response:
+        resp = requests.post(url, auth=auth, data=data, timeout=10)
+        resp.raise_for_status()
+        return resp
+
     try:
-        response = requests.post(url, auth=auth, data=data, timeout=10)
+        response = _instapaper_api_call()
         logger.info(f"Instapaper API responded with HTTP Status Code: {response.status_code}")
-        
-        if response.status_code == 401:
-            logger.error("❌ HTTP 401 Unauthorized: Instapaper tokens are invalid. Clearing stored credentials to trigger re-auth.")
+    except requests.RequestException as e:
+        logger.error(f"HTTP request failed: {str(e)}")
+        if "401" in str(e):
+            logger.error("Instapaper tokens invalid. Clearing stored credentials to trigger re-auth.")
             set_setting(session, "instapaper_oauth_token", "", section="instapaper")
             set_setting(session, "instapaper_oauth_token_secret", "", section="instapaper")
             raise RuntimeError("Instapaper API returned Unauthorized (401). Cached tokens cleared.")
-            
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"HTTP request failed: {str(e)}")
         raise RuntimeError(f"Failed to connect to Instapaper API: {e}")
         
     try:

@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Session, select, update
@@ -24,10 +25,6 @@ def _handle_signal(signum, frame):
     _shutdown_requested = True
 
 
-signal.signal(signal.SIGINT, _handle_signal)
-signal.signal(signal.SIGTERM, _handle_signal)
-
-
 def reset_stalled_bookmarks(session: Session) -> int:
     """
     On startup, reset any bookmarks stuck in active processing states
@@ -45,8 +42,8 @@ def reset_stalled_bookmarks(session: Session) -> int:
             bookmark.status = "queued"
             session.add(bookmark)
             reset_count += 1
-        if stalled:
-            session.commit()
+    if reset_count:
+        session.commit()
     return reset_count
 
 
@@ -146,13 +143,8 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
                 engine_name=tts_engine,
             )
 
-            if output_path.exists():
-                filename = f"{stem}.mp3"
-            else:
-                wav_path = output_path.with_suffix(".wav")
-                filename = f"{stem}.wav" if wav_path.exists() else f"{stem}.mp3"
-
-            bookmark.audio_filename = filename
+            actual_path = Path(stats["output_path"])
+            bookmark.audio_filename = actual_path.name
             bookmark.audio_filesize = stats["filesize"]
             bookmark.audio_duration = stats["duration"]
             bookmark.status = "completed"
@@ -172,6 +164,11 @@ async def run_worker(poll_interval: float = 2.0) -> None:
     Main async poll loop. Claims queued bookmarks and processes them
     until graceful shutdown is requested.
     """
+    # Register signal handlers here (not at module level) to avoid installing
+    # them on import — e.g. when imported from tests or the FastAPI process
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
     logger.info("Worker starting up...")
     init_db()
 
@@ -183,14 +180,18 @@ async def run_worker(poll_interval: float = 2.0) -> None:
 
     logger.info(f"Worker polling every {poll_interval}s. Press Ctrl+C to exit.")
 
+    consecutive_idle = 0
     while not _shutdown_requested:
         try:
             with Session(engine) as session:
                 bookmark = claim_next_bookmark(session)
                 if bookmark:
+                    consecutive_idle = 0
                     await process_bookmark_pipeline_worker(bookmark.id)
                 else:
-                    await asyncio.sleep(poll_interval)
+                    consecutive_idle += 1
+                    sleep_time = min(poll_interval * (1.5 ** min(consecutive_idle, 5)), 30.0)
+                    await asyncio.sleep(sleep_time)
         except Exception:
             logger.exception("Worker: Unexpected error in main loop")
             await asyncio.sleep(poll_interval)

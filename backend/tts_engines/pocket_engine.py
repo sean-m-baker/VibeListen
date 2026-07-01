@@ -21,6 +21,7 @@ VOICE_REPO = "kyutai/tts-voices"
 _VOICES_CACHE: list[str] | None = None
 _VOICES_CACHE_TIME: float = 0
 _VOICES_CACHE_TTL = 300
+_VOICES_CACHE_LOCK = threading.Lock()
 
 
 class PocketEngine(BaseTTSEngine):
@@ -53,27 +54,31 @@ class PocketEngine(BaseTTSEngine):
             self._tts = get_default_tts_model(n_q=32, device=self._device)
             logger.info("Pocket TTS model loaded.")
 
-    def _available_voices(self) -> list[str]:
+    async def _available_voices(self) -> list[str]:
         global _VOICES_CACHE, _VOICES_CACHE_TIME
         now = time.monotonic()
         if _VOICES_CACHE is not None and (now - _VOICES_CACHE_TIME) < _VOICES_CACHE_TTL:
             return _VOICES_CACHE
-        try:
-            if self._tts is None:
-                self._load_model()
-            files = list_repo_files(VOICE_REPO)
-            suffix = self._tts.voice_suffix
-            names = set()
-            for f in files:
-                if suffix and f.endswith(suffix):
-                    names.add(f[: -len(suffix)])
-            _VOICES_CACHE = sorted(names)
-            _VOICES_CACHE_TIME = now
-            return _VOICES_CACHE
-        except Exception:
-            return _VOICES_CACHE or []
+        with _VOICES_CACHE_LOCK:
+            if _VOICES_CACHE is not None and (now - _VOICES_CACHE_TIME) < _VOICES_CACHE_TTL:
+                return _VOICES_CACHE
+            try:
+                if self._tts is None:
+                    self._load_model()
+                import asyncio
+                files = await asyncio.to_thread(list_repo_files, VOICE_REPO)
+                suffix = self._tts.voice_suffix
+                names = set()
+                for f in files:
+                    if suffix and f.endswith(suffix):
+                        names.add(f[: -len(suffix)])
+                _VOICES_CACHE = sorted(names)
+                _VOICES_CACHE_TIME = time.monotonic()
+                return _VOICES_CACHE
+            except Exception:
+                return _VOICES_CACHE or []
 
-    def _voice_to_path(self, voice: str) -> str:
+    async def _voice_to_path(self, voice: str) -> str:
         if self._tts is None:
             raise RuntimeError("Model not loaded. Call _load_model() first.")
 
@@ -87,7 +92,7 @@ class PocketEngine(BaseTTSEngine):
             return str(ref.resolve())
 
         if voice == "default":
-            voices = self._available_voices()
+            voices = await self._available_voices()
             if not voices:
                 raise RuntimeError(
                     "No default voices available. Upload a reference WAV and use 'cloned' voice."
@@ -95,21 +100,23 @@ class PocketEngine(BaseTTSEngine):
             voice = voices[0]
 
         suffix = self._tts.voice_suffix
+        import asyncio
         try:
-            local = hf_hub_download(
+            local = await asyncio.to_thread(
+                hf_hub_download,
                 repo_id=VOICE_REPO,
                 filename=voice + suffix,
             )
             return local
         except Exception as exc:
-            available = self._available_voices()
+            available = await self._available_voices()
             msg = f"Voice '{voice}' not found in {VOICE_REPO}."
             if available:
                 msg += f" Available: {', '.join(available[:10])}"
             raise RuntimeError(msg) from exc
 
-    def available_voice_names(self) -> list[str]:
-        return self._available_voices()
+    async def available_voice_names(self) -> list[str]:
+        return await self._available_voices()
 
     async def synthesize(
         self,
@@ -130,7 +137,7 @@ class PocketEngine(BaseTTSEngine):
 
         self._load_model()
 
-        voice_path = self._voice_to_path(voice)
+        voice_path = await self._voice_to_path(voice)
         logger.info(f"Synthesizing with Pocket TTS (voice={voice})...")
         pcms = self._tts.simple_generate(full_text, voice_path, show_progress=False)
         if not pcms:
@@ -142,4 +149,4 @@ class PocketEngine(BaseTTSEngine):
 
         filesize = os.path.getsize(wav_path)
         estimated_duration = wav.shape[-1] / SAMPLE_RATE
-        return {"filesize": filesize, "duration": estimated_duration}
+        return {"filesize": filesize, "duration": estimated_duration, "output_path": wav_path}

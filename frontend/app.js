@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentFilter = "all";
     let searchQuery = "";
     let pollingInterval = null;
+    const cardMap = new Map();
 
     // Read API key from meta tag injected by server for authenticated requests
     const _API_KEY = (document.querySelector('meta[name="api-key"]') || {}).content || "";
@@ -182,23 +183,73 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function renderBookmarks() {
-        bookmarksGrid.innerHTML = "";
+    function _buildCardHTML(b, dateStr) {
+        let badgeHtml, actionBtnHtml, durationHtml;
 
-        // Sync active state across tab buttons and stats cards
+        if (b.status === "completed") {
+            badgeHtml = `<span class="badge badge-success">Listen Ready</span>`;
+            actionBtnHtml = `
+                <button class="btn btn-card btn-card-play" data-id="${b.id}">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    <span>Listen Now</span>
+                </button>`;
+            const durationMin = Math.round(b.audio_duration / 60);
+            durationHtml = `
+                <div class="duration-text">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span>${durationMin} min</span>
+                </div>`;
+        } else if (["queued", "parsing", "synthesizing"].includes(b.status)) {
+            const text = b.status === "parsing" ? "Parsing Content" : b.status === "synthesizing" ? "Synthesizing Speech" : "Compiling";
+            badgeHtml = `<span class="badge badge-active">${text}</span>`;
+            actionBtnHtml = `<button class="btn-card" disabled><svg class="icon spin" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></svg><span>Processing...</span></button>`;
+        } else {
+            const label = b.status === "parsing_failed" ? "Parsing Failed" : (b.status === "failed" ? "Speech Failed" : "Unprocessed");
+            badgeHtml = `<span class="badge ${b.status.includes("failed") ? "badge-error" : "badge-pending"}">${label}</span>`;
+            actionBtnHtml = `
+                <button class="btn btn-card btn-generate" data-id="${b.id}">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Generate Audio</span>
+                </button>`;
+        }
+
+        const deleteBtnHtml = `<button class="btn-card-delete" data-id="${b.id}" title="Delete bookmark">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>`;
+
+        return `
+            <div class="card-top">
+                <div class="card-meta">
+                    <span class="card-domain">${escapeHTML(b.domain)}</span>
+                    <span class="card-badge-group">${badgeHtml}${deleteBtnHtml}</span>
+                </div>
+                <h3 class="card-title">${escapeHTML(b.title)}</h3>
+                <p class="card-author">${b.author ? escapeHTML(b.author) : "No author snippet"}</p>
+            </div>
+            <div class="card-bottom-container" id="bottom-container-${b.id}">
+                <div class="card-footer">
+                    <span class="duration-text">${dateStr}</span>
+                    ${durationHtml}
+                    ${actionBtnHtml}
+                </div>
+            </div>`;
+    }
+
+    function _attachCardEvents(card, b) {
+        card.querySelector(".btn-card-play")?.addEventListener("click", () => expandAudioPlayer(b.id));
+        card.querySelector(".btn-generate")?.addEventListener("click", () => triggerGeneration(b.id));
+        card.querySelector(".btn-card-delete")?.addEventListener("click", () => deleteBookmark(b.id));
+    }
+
+    function renderBookmarks() {
         updateFilterUI();
 
-        // Filter bookmarks by Search & Tab Status
         const filtered = bookmarks.filter(b => {
-            // Search Query
             const matchesSearch =
                 b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (b.author && b.author.toLowerCase().includes(searchQuery.toLowerCase())) ||
                 b.domain.toLowerCase().includes(searchQuery.toLowerCase());
-
             if (!matchesSearch) return false;
-
-            // Tab Filter
             if (currentFilter === "all") return true;
             if (currentFilter === "completed") return b.status === "completed";
             if (currentFilter === "active") return ["queued", "parsing", "synthesizing"].includes(b.status);
@@ -209,114 +260,45 @@ document.addEventListener("DOMContentLoaded", () => {
         if (filtered.length === 0) {
             emptyState.classList.remove("hidden");
             bookmarksGrid.classList.add("hidden");
+            // Remove orphaned cards from the map
+            cardMap.forEach((el, id) => { el.remove(); cardMap.delete(id); });
             return;
         }
 
         emptyState.classList.add("hidden");
         bookmarksGrid.classList.remove("hidden");
 
-        filtered.forEach(b => {
-            const card = document.createElement("div");
-            card.className = `glass-panel bookmark-card status-${b.status}`;
+        const filteredIds = new Set(filtered.map(b => b.id));
 
-            // Format publication/added date
-            const dateObj = new Date(b.added_at);
-            const dateStr = dateObj.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-
-            // Set state badges and text configurations
-            let badgeHtml = "";
-            let actionBtnHtml = "";
-            let durationHtml = "";
-
-            if (b.status === "completed") {
-                badgeHtml = `<span class="badge badge-success">Listen Ready</span>`;
-                actionBtnHtml = `
-                    <button class="btn btn-card btn-card-play" data-id="${b.id}">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                        <span>Listen Now</span>
-                    </button>
-                `;
-
-                // Format estimated duration
-                const durationMin = Math.round(b.audio_duration / 60);
-                durationHtml = `
-                    <div class="duration-text">
-                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        <span>${durationMin} min</span>
-                    </div>
-                `;
-            } else if (["queued", "parsing", "synthesizing"].includes(b.status)) {
-                let text = "Compiling";
-                if (b.status === "parsing") text = "Parsing Content";
-                if (b.status === "synthesizing") text = "Synthesizing Speech";
-
-                badgeHtml = `<span class="badge badge-active">${text}</span>`;
-                actionBtnHtml = `
-                    <button class="btn-card" disabled>
-                        <svg class="icon spin" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></svg>
-                        <span>Processing...</span>
-                    </button>
-                `;
-            } else {
-                const label = b.status === "parsing_failed" ? "Parsing Failed" : (b.status === "failed" ? "Speech Failed" : "Unprocessed");
-                const badgeClass = b.status.includes("failed") ? "badge-error" : "badge-pending";
-
-                badgeHtml = `<span class="badge ${badgeClass}">${label}</span>`;
-                actionBtnHtml = `
-                    <button class="btn btn-card btn-generate" data-id="${b.id}">
-                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                        <span>Generate Audio</span>
-                    </button>
-                `;
+        // Remove cards for bookmarks no longer in the filtered set
+        cardMap.forEach((el, id) => {
+            if (!filteredIds.has(id)) {
+                el.remove();
+                cardMap.delete(id);
             }
-
-            const deleteBtnHtml = `<button class="btn-card-delete" data-id="${b.id}" title="Delete bookmark">
-                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>`;
-
-            card.innerHTML = `
-                <div class="card-top">
-                    <div class="card-meta">
-                        <span class="card-domain">${b.domain}</span>
-                        <span class="card-badge-group">${badgeHtml}${deleteBtnHtml}</span>
-                    </div>
-                    <h3 class="card-title">${escapeHTML(b.title)}</h3>
-                    <p class="card-author">${b.author ? escapeHTML(b.author) : "No author snippet"}</p>
-                </div>
-                <div class="card-bottom-container" id="bottom-container-${b.id}">
-                    <div class="card-footer">
-                        <span class="duration-text">${dateStr}</span>
-                        ${durationHtml}
-                        ${actionBtnHtml}
-                    </div>
-                </div>
-            `;
-
-            bookmarksGrid.appendChild(card);
         });
 
-        // Add Play Button event listeners
-        document.querySelectorAll(".btn-card-play").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                const id = e.currentTarget.getAttribute("data-id");
-                expandAudioPlayer(id);
-            });
-        });
-
-        // Add Generate Button event listeners
-        document.querySelectorAll(".btn-generate").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                const id = e.currentTarget.getAttribute("data-id");
-                triggerGeneration(id);
-            });
-        });
-
-        // Add Delete Button event listeners
-        document.querySelectorAll(".btn-card-delete").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                const id = e.currentTarget.getAttribute("data-id");
-                deleteBookmark(id);
-            });
+        // Upsert cards for the filtered bookmarks
+        filtered.forEach(b => {
+            const dateStr = new Date(b.added_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+            let card = cardMap.get(b.id);
+            if (card) {
+                // Update existing card's inner HTML in-place
+                const newContent = _buildCardHTML(b, dateStr);
+                if (card.innerHTML !== newContent) {
+                    card.className = `glass-panel bookmark-card status-${b.status}`;
+                    card.innerHTML = newContent;
+                    _attachCardEvents(card, b);
+                }
+            } else {
+                // Create new card element
+                card = document.createElement("div");
+                card.className = `glass-panel bookmark-card status-${b.status}`;
+                card.innerHTML = _buildCardHTML(b, dateStr);
+                cardMap.set(b.id, card);
+                bookmarksGrid.appendChild(card);
+                _attachCardEvents(card, b);
+            }
         });
     }
 
@@ -369,7 +351,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 console.log("Active synthesis detected. Starting status auto-polling...");
                 pollingInterval = setInterval(() => {
                     fetchBookmarks(true); // Poll silently in background
-                }, 3000);
+                }, 5000);
             }
         } else {
             if (pollingInterval) {
