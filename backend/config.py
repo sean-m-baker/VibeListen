@@ -8,11 +8,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env file at the project root
 load_dotenv(BASE_DIR / ".env")
 
-# Security: required key for API auth + credential encryption
+# Security: API authentication key (injected into frontend HTML)
 SECRET_KEY: str = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
     raise RuntimeError(
         "SECRET_KEY environment variable is required. "
+        "Generate one with: python -c \"from cryptography.fernet import Fernet; "
+        "print(Fernet.generate_key().decode())\""
+    )
+
+# Separate encryption key for credential storage at rest (never exposed to client)
+ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
+if not ENCRYPTION_KEY:
+    raise RuntimeError(
+        "ENCRYPTION_KEY environment variable is required. "
         "Generate one with: python -c \"from cryptography.fernet import Fernet; "
         "print(Fernet.generate_key().decode())\""
     )

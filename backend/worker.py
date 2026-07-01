@@ -9,7 +9,7 @@ from typing import Optional
 from sqlmodel import Session, select, update
 
 from backend.auth import sanitize_filename
-from backend.config import AUDIO_DIR
+from backend.config import AUDIO_DIR, AUDIO_CACHE_DIR
 from backend.database import engine, init_db, Bookmark, get_setting
 from backend.parser import extract_article_content
 from backend.tts import generate_podcast_audio
@@ -147,6 +147,29 @@ async def process_bookmark_pipeline_worker(bookmark_id: int) -> None:
             bookmark.audio_filename = actual_path.name
             bookmark.audio_filesize = stats["filesize"]
             bookmark.audio_duration = stats["duration"]
+
+            # Transcode WAV to MP3 in the background so the HTTP endpoint never
+            # needs to spawn ffmpeg on-demand (prevents transcoding DoS).
+            if actual_path.suffix == ".wav":
+                mp3_name = actual_path.stem + ".mp3"
+                mp3_path = AUDIO_CACHE_DIR / mp3_name
+                mp3_path.parent.mkdir(parents=True, exist_ok=True)
+                bitrate = get_setting(session, "audio_bitrate", "64", section="tts")
+                process = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-i", str(actual_path),
+                    "-codec:a", "libmp3lame",
+                    "-b:a", f"{bitrate}k",
+                    "-ar", "24000",
+                    "-ac", "1",
+                    str(mp3_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await process.communicate()
+                if process.returncode != 0:
+                    logger.error("ffmpeg transcoding failed for %s: %s",
+                                 actual_path, stderr.decode(errors="replace"))
+
             bookmark.status = "completed"
             bookmark.generated_at = datetime.now(timezone.utc)
             session.add(bookmark)

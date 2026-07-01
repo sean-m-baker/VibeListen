@@ -97,13 +97,10 @@ class TestInternalIP:
         assert is_internal_ip("1.1.1.1") is False
         assert is_internal_ip("93.184.216.34") is False  # example.com
 
-    def test_hostname_resolves(self):
-        """Hostnames that resolve to public IPs should return False."""
+    def test_non_ip_string(self):
+        """Non-IP strings should return False (no resolution attempted)."""
         assert is_internal_ip("example.com") is False
-
-    def test_unresolvable_hostname(self):
-        """Unresolvable hostnames should be treated as internal (safe default)."""
-        assert is_internal_ip("this-does-not-exist-totally.invalid") is True
+        assert is_internal_ip("localhost") is False
 
 
 class TestSanitizeFilename:

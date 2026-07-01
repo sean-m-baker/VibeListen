@@ -1,6 +1,7 @@
 import pytest
 import hashlib
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy.pool import StaticPool
@@ -197,31 +198,36 @@ def test_rss_feed_includes_wav_filesize_estimate(client, db_engine):
     not shutil_which("ffmpeg"),
     reason="ffmpeg not available on this system"
 )
-def test_rss_audio_transcodes_wav_to_mp3(client, db_engine, tmp_path):
-    """GET /rss-audio/{file}.mp3 should transcode WAV to MP3 on first request."""
+def test_rss_audio_serves_cached_mp3(client, db_engine, tmp_path):
+    """GET /rss-audio/{file}.mp3 should serve a pre-cached transcoded MP3."""
     import shutil
     import wave
 
-    # Create a test WAV file
+    # Create a test WAV file (source for transcoding — not served directly anymore)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / "test_audio.wav"
     with wave.open(str(wav_path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(24000)
-        w.writeframes(b"\x00\x00" * 24000)  # 1 second of silence
+        w.writeframes(b"\x00\x00" * 24000)
 
-    # Set audio_bitrate
-    _set_setting(db_engine, "audio_bitrate", "64", section="tts")
+    # Pre-transcode to the cache directory (as the background worker now does)
+    AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    mp3_path = AUDIO_CACHE_DIR / "test_audio.mp3"
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(wav_path),
+        "-codec:a", "libmp3lame", "-b:a", "64k",
+        "-ar", "24000", "-ac", "1",
+        str(mp3_path),
+    ], capture_output=True, check=True)
 
     response = client.get("/rss-audio/test_audio.mp3")
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/mpeg"
     assert len(response.content) > 0
 
-    # Cleanup
     wav_path.unlink(missing_ok=True)
-    mp3_path = AUDIO_CACHE_DIR / "test_audio.mp3"
     mp3_path.unlink(missing_ok=True)
 
 

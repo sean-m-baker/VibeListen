@@ -1,18 +1,44 @@
 import pytest
 from unittest.mock import patch, MagicMock
+import socket
 
 from backend.parser import _validate_url, extract_article_content
+
+
+@pytest.fixture(autouse=True)
+def mock_dns():
+    """Default: resolve hostnames to a public IP. Individual tests can override."""
+    def _resolve(host, port=0, family=0, type=0, proto=0, flags=0):
+        if host in ("127.0.0.1", "10.0.0.1", "172.16.0.1",
+                     "192.168.1.1", "169.254.169.254"):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (host, port))]
+        if host in ("this-does-not-exist-totally.invalid",):
+            raise socket.gaierror("[Errno -2] Name or service not known")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", port))]
+    with patch("socket.getaddrinfo", side_effect=_resolve):
+        yield
 
 
 class TestValidateURL:
     """SSRF validation — _validate_url rejects internal/private destinations."""
 
     def test_valid_external_url(self):
-        """Well-formed public URL should pass validation."""
-        assert _validate_url("https://example.com/article") == "https://example.com/article"
+        scheme, ip, host, path = _validate_url("https://example.com/article")
+        assert scheme == "https"
+        assert ip == "93.184.216.34"
+        assert host == "example.com"
+        assert path == "/article"
 
     def test_valid_http_url(self):
-        assert _validate_url("http://example.com") == "http://example.com"
+        scheme, ip, host, path = _validate_url("http://example.com")
+        assert scheme == "http"
+        assert ip == "93.184.216.34"
+        assert host == "example.com"
+        assert path == "/"
+
+    def test_url_with_query_preserved(self):
+        _, _, _, path = _validate_url("http://example.com/page?q=1&r=2")
+        assert path == "/page?q=1&r=2"
 
     def test_no_hostname_raises(self):
         with pytest.raises(ValueError, match="no hostname"):
@@ -47,12 +73,13 @@ class TestValidateURL:
             _validate_url("http://169.254.169.254/latest/meta-data/")
 
     def test_hostname_resolves_to_public_passes(self):
-        """Hostnames that resolve to public IPs should be allowed."""
-        assert _validate_url("http://example.com") == "http://example.com"
+        scheme, ip, host, _ = _validate_url("http://example.com")
+        assert scheme == "http"
+        assert ip == "93.184.216.34"
+        assert host == "example.com"
 
     def test_unresolvable_hostname_raises(self):
-        """Unresolvable hostnames are treated as internal (safe default)."""
-        with pytest.raises(ValueError, match="internal/private"):
+        with pytest.raises(ValueError, match="Could not resolve"):
             _validate_url("http://this-does-not-exist-totally.invalid/page")
 
 
@@ -71,7 +98,7 @@ class TestExtractArticleContent:
     </body></html>
     """
 
-    @patch("backend.parser.requests.get")
+    @patch("backend.parser._HTTP_SESSION.get")
     def test_successful_extraction(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -86,14 +113,14 @@ class TestExtractArticleContent:
         assert "Nav links" not in result
         assert "Footer stuff" not in result
 
-    @patch("backend.parser.requests.get")
+    @patch("backend.parser._HTTP_SESSION.get")
     def test_ssrf_blocked_before_request(self, mock_get):
         """SSRF targets should be rejected without making any HTTP call."""
         with pytest.raises(RuntimeError, match="internal/private"):
             extract_article_content("http://127.0.0.1/secret")
         mock_get.assert_not_called()
 
-    @patch("backend.parser.requests.get")
+    @patch("backend.parser._HTTP_SESSION.get")
     def test_http_error_propagates(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 404
@@ -103,7 +130,7 @@ class TestExtractArticleContent:
         with pytest.raises(RuntimeError, match="Failed to download"):
             extract_article_content("https://example.com/404")
 
-    @patch("backend.parser.requests.get")
+    @patch("backend.parser._HTTP_SESSION.get")
     def test_empty_content_raises(self, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200

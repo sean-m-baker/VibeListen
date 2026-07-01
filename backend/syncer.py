@@ -14,6 +14,9 @@ from backend.database import Bookmark, get_setting, set_setting
 # Configure logger for the syncer module
 logger = logging.getLogger("VibeListen.Syncer")
 
+# Reusable HTTP session with connection pooling (Keep-Alive)
+_HTTP_SESSION = requests.Session()
+
 # Raindrop API base endpoints
 RAINDROP_API_URL = "https://api.raindrop.io/rest/v1/raindrops/0"
 
@@ -53,7 +56,7 @@ def sync_raindrops(session: Session, limit: int = 50) -> int:
         retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
     )
     def _raindrop_api_call() -> requests.Response:
-        resp = requests.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
+        resp = _HTTP_SESSION.get(RAINDROP_API_URL, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         return resp
 
@@ -142,7 +145,7 @@ def get_instapaper_oauth_tokens(
         "x_auth_mode": "client_auth"
     }
     logger.info("Sending xAuth request to Instapaper...")
-    response = requests.post(url, auth=auth, data=data, timeout=10)
+    response = _HTTP_SESSION.post(url, auth=auth, data=data, timeout=10)
     
     if response.status_code == 401:
         logger.error("❌ HTTP 401 Unauthorized: Invalid Instapaper credentials or API consumer keys.")
@@ -223,7 +226,7 @@ def sync_instapaper(session: Session, limit: int = 50) -> int:
         retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
     )
     def _instapaper_api_call() -> requests.Response:
-        resp = requests.post(url, auth=auth, data=data, timeout=10)
+        resp = _HTTP_SESSION.post(url, auth=auth, data=data, timeout=10)
         resp.raise_for_status()
         return resp
 

@@ -141,7 +141,10 @@ class PocketEngine(BaseTTSEngine):
 
         voice_path = await self._voice_to_path(voice)
         logger.info(f"Synthesizing with Pocket TTS (voice={voice})...")
-        pcms = self._tts.simple_generate(full_text, voice_path, show_progress=False)
+        import asyncio
+        pcms = await asyncio.to_thread(
+            self._tts.simple_generate, full_text, voice_path, show_progress=False
+        )
         if not pcms:
             raise RuntimeError("Pocket TTS synthesis returned empty result.")
         wav = pcms[0].cpu().numpy()

@@ -13,9 +13,10 @@ from backend import config
 logger = logging.getLogger("VibeListen.Auth")
 
 # Fernet cipher for encrypting/decrypting secrets at rest
-_fernet = Fernet(
-    config.SECRET_KEY.encode() if isinstance(config.SECRET_KEY, str) else config.SECRET_KEY
-)
+# Uses ENCRYPTION_KEY (separate from SECRET_KEY) so that an XSS or proxy
+# exposure of the client-side API key does not compromise stored credentials.
+_encryption_key = config.ENCRYPTION_KEY.encode() if isinstance(config.ENCRYPTION_KEY, str) else config.ENCRYPTION_KEY
+_fernet = Fernet(_encryption_key)
 
 # Key name substrings whose values are considered secret and should be
 # encrypted at rest and redacted in API responses.
@@ -97,23 +98,13 @@ _PRIVATE_RANGES = [
 
 
 @lru_cache(maxsize=1024)
-def is_internal_ip(host: str) -> bool:
-    """Resolve *host* and return True if it points to a private / reserved IP."""
+def is_internal_ip(ip_str: str) -> bool:
+    """Return True if *ip_str* is a private / reserved IP (no DNS resolution)."""
     try:
-        addrs = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        logger.warning("is_internal_ip: could not resolve %s — treating as internal", host)
-        return True
-
-    for family, _, _, _, sockaddr in addrs:
-        ip = sockaddr[0]
-        try:
-            addr = ipaddress.ip_address(ip)
-            if any(addr in net for net in _PRIVATE_RANGES):
-                return True
-        except ValueError:
-            continue
-    return False
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return any(addr in net for net in _PRIVATE_RANGES)
 
 
 # ---------------------------------------------------------------------------

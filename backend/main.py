@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 from backend.config import BASE_DIR, AUDIO_DIR, AUDIO_CACHE_DIR, MODELS_DIR, REFERENCE_WAV_PATH, SECRET_KEY
 from backend.database import init_db, get_session, Bookmark, Setting, get_setting, set_setting
 from backend.auth import require_api_key, require_csrf_header, is_secret_key, secret_redactor, sanitize_filename
+from backend.schemas import validate_setting
 from backend.syncer import sync_bookmarks
 from backend.rss_generator import generate_podcast_rss
 from backend.tts_engines import list_available_engines
@@ -67,46 +68,23 @@ app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 # ----------------- Transcoded Audio for RSS -----------------
 
 @app.get("/rss-audio/{filename:path}")
-async def serve_rss_audio(filename: str, db: Session = Depends(get_session)):
-    """Serve WAV files transcoded to MP3 for mobile podcast app compatibility."""
+async def serve_rss_audio(filename: str):
+    """Serve pre-transcoded MP3 audio for podcast app compatibility.
+
+    Transcoding is done by the background worker after synthesis completes,
+    so this endpoint only serves already-cached files — it never spawns
+    ffmpeg dynamically (prevents unauthenticated DoS via CPU exhaustion).
+    """
     if not filename.endswith(".mp3"):
         raise HTTPException(status_code=400, detail="Only MP3 output is supported")
-
-    # Prevent path traversal — reject separators and parent-dir references
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    stem = filename[:-4]
-    wav_filename = stem + ".wav"
-    wav_path = (AUDIO_DIR / wav_filename).resolve()
-    if not str(wav_path).startswith(str(AUDIO_DIR.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid audio path")
-
-    if not wav_path.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
-
-    bitrate = get_setting(db, "audio_bitrate", "64", section="tts")
     mp3_path = (AUDIO_CACHE_DIR / filename).resolve()
     if not str(mp3_path).startswith(str(AUDIO_CACHE_DIR.resolve())):
         raise HTTPException(status_code=400, detail="Invalid cache path")
-
     if not mp3_path.exists():
-        AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        process = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", str(wav_path),
-            "-codec:a", "libmp3lame",
-            "-b:a", f"{bitrate}k",
-            "-ar", "24000",
-            "-ac", "1",
-            str(mp3_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await process.communicate()
-        if process.returncode != 0:
-            error_msg = stderr.decode(errors="replace") if stderr else "Unknown error"
-            logger.error(f"ffmpeg transcoding failed for {wav_path}: {error_msg}")
-            raise HTTPException(status_code=500, detail="Audio transcoding failed")
+        raise HTTPException(status_code=404, detail="Audio file not found")
 
     return FileResponse(mp3_path, media_type="audio/mpeg", filename=filename)
 
@@ -245,6 +223,7 @@ def update_setting(
     _csrf: None = Depends(require_csrf_header),
 ):
     """Create or update a single setting."""
+    validate_setting(section, key, value)
     setting = set_setting(db, key, value, section)
     logger.info(f"Setting updated: [{section}] {key} = {value}")
     return {"status": "success", "section": setting.section, "key": setting.key, "value": setting.value}
@@ -265,6 +244,7 @@ def bulk_update_settings(
     """
     for section, keys in payload.items():
         for key, value in keys.items():
+            validate_setting(section, key, value)
             set_setting(db, key, value, section, commit=False)
     db.commit()
     logger.info(f"Bulk settings update: {sum(len(v) for v in payload.values())} values")
