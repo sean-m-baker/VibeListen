@@ -29,6 +29,12 @@ VibeListen/
 │   ├─ db.sqlite          # SQLite database (WAL mode)
 │   └─ models/            # Local TTS model files
 ├─ tests/                 # Pytest suite (async tests for API & worker)
+├─ setup.py              # Setup wizard: bootstrap .env, install deps, diagnostics
+├─ install.sh            # Unix one-command installer (creates .venv, runs setup.py)
+├─ Dockerfile            # Multi-stage Docker image (amd64 + arm64)
+├─ docker-compose.yml    # Single-command Docker deployment
+├─ docker-entrypoint.sh  # Docker auto-bootstrap (creates .env on first start)
+├─ .dockerignore         # Docker build context exclusions
 ├─ .env.example          # Example environment configuration
 ├─ start.py              # Launcher (server + worker in one command)
 ├─ AGENTS.md             # Developer onboarding & workflow guide
@@ -40,30 +46,29 @@ VibeListen/
 ---
 
 ## 🛠️ Setup & Installation
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/yourorg/VibeListen.git
-   cd VibeListen
-   ```
-2. **Create a Python virtual environment** (recommended, Python 3.13+)
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt           # core deps
-   pip install -r requirements-local.txt     # all local TTS engines (Piper + Pocket)
-   ```
-   > Install engines individually for a lighter footprint:
-   > - `pip install -r requirements-piper.txt`   — Piper (ONNX‑based, ~50 MB)
-   > - `pip install -r requirements-pocket.txt`  — Pocket (PyTorch‑based, ~3 GB on first use, GPU recommended)
-4. **Configure environment variables**
-   - Copy the example file:
-     ```bash
-     cp .env.example .env
-     ```
-   - Edit `.env` and set the required values (see the **Environment** section).
+
+Choose your pathway:
+
+### Option A — Local (Linux / macOS)
+```bash
+./install.sh                     # interactive setup (creates .venv, installs deps)
+python start.py                  # start server + worker
+```
+- `./install.sh --engine=piper --quiet` for non-interactive setup
+- `python start.py --port 8001` for a custom port
+- `python start.py --setup` to re-run the setup wizard
+- **Dependencies**: `ffmpeg` is required for audio transcoding.
+  - Ubuntu/Debian: `sudo apt install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Arch: `sudo pacman -S ffmpeg`
+
+### Option B — Docker
+```bash
+docker compose up -d --build     # builds and starts in background
+```
+- Container auto-generates `.env` with secure keys on first start
+- Data persists in `./data/` (database, audio, models)
+- Build a smaller image: `docker compose build --build-arg TTS_PROFILE=edge`
 
 ---
 

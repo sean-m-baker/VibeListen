@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  vibelisten:
+    build:
+      context: .
+      # Build smaller images by setting TTS_PROFILE=edge|piper|pocket|all
+      #   edge:   cloud TTS only (~200 MB)
+      #   piper:  + local ONNX (~300 MB)
+      #   all:    + local PyTorch (~3 GB on first model download)
+      args:
+        TTS_PROFILE: all
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist database, audio files, and TTS models across restarts
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
