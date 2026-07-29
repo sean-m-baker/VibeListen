@@ -16,7 +16,8 @@ services:
       # Persist database, audio files, and TTS models across restarts
       - ./data:/app/data
     env_file:
-      - .env
+      - path: .env
+        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]

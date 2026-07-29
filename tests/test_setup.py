@@ -269,3 +269,17 @@ class TestWriteEngineEnv:
         env_text = env.read_text()
         assert "TTS_ENGINE=pocket" in env_text
         assert "TTS_ENGINE_FAILED=requirements-pocket.txt" in env_text
+
+    def test_updates_default_voice(self, tmp_path):
+        """_write_engine_env should update DEFAULT_VOICE to match chosen engine."""
+        env = tmp_path / ".env"
+        env.write_text("TTS_ENGINE=edge\nDEFAULT_VOICE=en-US-AvaNeural\n")
+        _write_engine_env("piper", project_root=tmp_path)
+        env_text = env.read_text()
+        assert "TTS_ENGINE=piper" in env_text
+        assert "DEFAULT_VOICE=en_US-lessac-medium" in env_text
+
+        _write_engine_env("pocket", project_root=tmp_path)
+        env_text = env.read_text()
+        assert "TTS_ENGINE=pocket" in env_text
+        assert "DEFAULT_VOICE=default" in env_text

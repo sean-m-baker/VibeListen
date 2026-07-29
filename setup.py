@@ -259,6 +259,13 @@ ENGINE_REQUIREMENTS: dict[str, list[str]] = {
     "all": ["requirements.txt", "requirements-local.txt"],
 }
 
+ENGINE_DEFAULT_VOICES: dict[str, str] = {
+    "edge": "en-US-AvaNeural",
+    "piper": "en_US-lessac-medium",
+    "pocket": "default",
+    "all": "en-US-AvaNeural",
+}
+
 
 def install_tts_deps(engine: str, quiet: bool = False, project_root: Path | None = None) -> bool:
     """Install Python dependencies for the selected TTS engine.
@@ -322,6 +329,8 @@ def _write_engine_env(engine: str, failed: list[str] | None = None, project_root
 
     raw = env_path.read_text()
     raw = _inject_key(raw, "TTS_ENGINE", engine)
+    if engine in ENGINE_DEFAULT_VOICES:
+        raw = _inject_key(raw, "DEFAULT_VOICE", ENGINE_DEFAULT_VOICES[engine])
 
     if failed is not None:
         if failed:
