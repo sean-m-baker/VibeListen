@@ -28,12 +28,12 @@ WORKDIR /app
 
 # Install core dependencies first (cache-efficient layer)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --user --no-cache-dir -r requirements.txt
 
 # Conditionally install local TTS engines based on build arg
 COPY requirements-local.txt requirements-piper.txt requirements-pocket.txt ./
 RUN if [ "$TTS_PROFILE" != "edge" ]; then \
-        pip install --no-cache-dir -r requirements-local.txt; \
+        pip install --user --no-cache-dir -r requirements-local.txt; \
     fi
 
 # ---------------------------------------------------------------------------
@@ -48,9 +48,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy installed Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy installed Python packages from builder's user site-packages
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
 
 # Copy application code
 COPY . .

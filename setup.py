@@ -193,19 +193,29 @@ def ensure_env_configured(
         else:
             env_path.write_text("# VibeListen Environment Configuration\n\n")
             print("[Setup] Created minimal .env (no .env.example found)")
-
-        secret_key = generate_fernet_key()
-        encryption_key = generate_fernet_key()
-
-        raw = env_path.read_text()
-        raw = _inject_key(raw, "SECRET_KEY", secret_key)
-        raw = _inject_key(raw, "ENCRYPTION_KEY", encryption_key)
-        env_path.write_text(raw)
-
         result["env_created"] = True
-        print("[Setup] Generated SECRET_KEY and ENCRYPTION_KEY")
+
+    # Inspect and generate Fernet keys if blank or missing
+    raw = env_path.read_text()
+    env_vars: dict[str, str] = {}
+    for line in raw.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            env_vars[k.strip()] = v.strip()
+
+    updated = False
+    if not env_vars.get("SECRET_KEY"):
+        raw = _inject_key(raw, "SECRET_KEY", generate_fernet_key())
+        updated = True
+    if not env_vars.get("ENCRYPTION_KEY"):
+        raw = _inject_key(raw, "ENCRYPTION_KEY", generate_fernet_key())
+        updated = True
+
+    if updated:
+        env_path.write_text(raw)
+        print("[Setup] Generated missing SECRET_KEY / ENCRYPTION_KEY in .env")
     else:
-        print("[Setup] .env already exists — skipping generation")
+        print("[Setup] .env configuration keys OK")
 
     _validate_keys(env_path)
 
@@ -293,8 +303,17 @@ def install_tts_deps(engine: str, quiet: bool = False, project_root: Path | None
     return all_ok
 
 
-def _write_engine_env(engine: str, failed: list[str], project_root: Path | None = None) -> None:
-    """Persist engine selection and failure info to ``.env``."""
+def _write_engine_env(engine: str, failed: list[str] | None = None, project_root: Path | None = None) -> None:
+    """Persist engine selection and failure info to ``.env``.
+
+    Parameters
+    ----------
+    engine : str
+        TTS engine name to write.
+    failed : list[str] or None
+        List of failed requirement files.  If None, ``TTS_ENGINE_FAILED``
+        is left unchanged.  If an empty list, ``TTS_ENGINE_FAILED`` is cleared.
+    """
     if project_root is None:
         project_root = Path(__file__).resolve().parent
     env_path = project_root / ".env"
@@ -304,12 +323,13 @@ def _write_engine_env(engine: str, failed: list[str], project_root: Path | None 
     raw = env_path.read_text()
     raw = _inject_key(raw, "TTS_ENGINE", engine)
 
-    if failed:
-        raw = _inject_key(raw, "TTS_ENGINE_FAILED", ",".join(failed))
-    else:
-        lines = raw.splitlines()
-        lines = [l for l in lines if not l.strip().startswith("TTS_ENGINE_FAILED=")]
-        raw = "\n".join(lines) + "\n"
+    if failed is not None:
+        if failed:
+            raw = _inject_key(raw, "TTS_ENGINE_FAILED", ",".join(failed))
+        else:
+            lines = raw.splitlines()
+            lines = [l for l in lines if not l.strip().startswith("TTS_ENGINE_FAILED=")]
+            raw = "\n".join(lines) + "\n"
 
     env_path.write_text(raw)
     print(f"[Setup] TTS_ENGINE set to '{engine}' in .env")
@@ -330,10 +350,7 @@ def _prompt_raindrop_token(project_root: Path) -> None:
         return
 
     raw = env_path.read_text()
-    raw = raw.replace(
-        "RAINDROP_TOKEN=your_raindrop_personal_test_token_here",
-        f"RAINDROP_TOKEN={token}",
-    )
+    raw = _inject_key(raw, "RAINDROP_TOKEN", token)
     env_path.write_text(raw)
     print("[Setup] RAINDROP_TOKEN saved to .env")
 
@@ -422,7 +439,7 @@ def main() -> None:
         install_ok = install_tts_deps(engine, quiet=args.quiet)
         if not install_ok and engine != "edge":
             print(f"\n  Falling back to 'edge' engine.")
-            _write_engine_env("edge", [])
+            _write_engine_env("edge", failed=ENGINE_REQUIREMENTS.get(engine, []))
             print("  TTS_ENGINE set to 'edge' in .env")
     print()
 

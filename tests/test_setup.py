@@ -16,6 +16,7 @@ from setup import (
     check_ffmpeg,
     _inject_key,
     _validate_keys,
+    _write_engine_env,
     DATA_SUBDIRS,
 )
 
@@ -200,3 +201,71 @@ class TestValidateKeys:
         env_path = tmp_path / ".env"
         env_path.write_text("OTHER=val\n")
         _validate_keys(env_path)
+
+
+# ---------------------------------------------------------------------------
+# BUG-01: Existing .env with blank keys gets populated
+# ---------------------------------------------------------------------------
+
+class TestExistingEnvWithBlankKeys:
+    def test_fills_blank_secret_key(self, tmp_path):
+        """Existing .env with blank SECRET_KEY should get a valid key."""
+        env = tmp_path / ".env"
+        env.write_text("SECRET_KEY=\nENCRYPTION_KEY=abc123\n")
+        ensure_env_configured(project_root=tmp_path)
+        env_text = env.read_text()
+        assert "SECRET_KEY=" in env_text
+        val = [l for l in env_text.splitlines() if l.startswith("SECRET_KEY=")][0].split("=", 1)[1]
+        assert len(val) == 44
+
+    def test_fills_blank_encryption_key(self, tmp_path):
+        """Existing .env with blank ENCRYPTION_KEY should get a valid key."""
+        env = tmp_path / ".env"
+        env.write_text("SECRET_KEY=abc123\nENCRYPTION_KEY=\n")
+        ensure_env_configured(project_root=tmp_path)
+        env_text = env.read_text()
+        assert "ENCRYPTION_KEY=" in env_text
+        val = [l for l in env_text.splitlines() if l.startswith("ENCRYPTION_KEY=")][0].split("=", 1)[1]
+        assert len(val) == 44
+
+    def test_does_not_overwrite_valid_keys(self, tmp_path):
+        """Existing .env with valid keys should not be touched."""
+        env = tmp_path / ".env"
+        env.write_text("SECRET_KEY=validkeyherethatis44charslong!!\nENCRYPTION_KEY=anothervalidkeyfortesting!!!!!\nMY_VAR=hello\n")
+        ensure_env_configured(project_root=tmp_path)
+        env_text = env.read_text()
+        assert "MY_VAR=hello" in env_text
+        assert "validkeyherethatis44charslong!!" in env_text
+
+
+# ---------------------------------------------------------------------------
+# _write_engine_env  (BUG-02: preserves TTS_ENGINE_FAILED on fallback)
+# ---------------------------------------------------------------------------
+
+class TestWriteEngineEnv:
+    def test_preserves_failed_when_none(self, tmp_path):
+        """Calling _write_engine_env with failed=None should not touch TTS_ENGINE_FAILED."""
+        env = tmp_path / ".env"
+        env.write_text("TTS_ENGINE=pocket\nTTS_ENGINE_FAILED=requirements-pocket.txt\n")
+        _write_engine_env("edge", failed=None, project_root=tmp_path)
+        env_text = env.read_text()
+        assert "TTS_ENGINE=edge" in env_text
+        assert "TTS_ENGINE_FAILED=requirements-pocket.txt" in env_text
+
+    def test_clears_failed_when_empty_list(self, tmp_path):
+        """Calling _write_engine_env with failed=[] should clear TTS_ENGINE_FAILED."""
+        env = tmp_path / ".env"
+        env.write_text("TTS_ENGINE=pocket\nTTS_ENGINE_FAILED=requirements-pocket.txt\n")
+        _write_engine_env("edge", failed=[], project_root=tmp_path)
+        env_text = env.read_text()
+        assert "TTS_ENGINE=edge" in env_text
+        assert "TTS_ENGINE_FAILED=" not in env_text
+
+    def test_sets_failed_when_provided(self, tmp_path):
+        """Calling _write_engine_env with a failed list should set TTS_ENGINE_FAILED."""
+        env = tmp_path / ".env"
+        env.write_text("TTS_ENGINE=edge\n")
+        _write_engine_env("pocket", failed=["requirements-pocket.txt"], project_root=tmp_path)
+        env_text = env.read_text()
+        assert "TTS_ENGINE=pocket" in env_text
+        assert "TTS_ENGINE_FAILED=requirements-pocket.txt" in env_text
