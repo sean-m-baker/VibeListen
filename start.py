@@ -4,11 +4,13 @@ VibeListen Launcher
 ================
 Starts both the FastAPI web server and the background worker in parallel,
 with cross-platform graceful shutdown on Ctrl+C or SIGTERM.
+Auto-bootstraps .env and data directories on first run.
 
 Usage:
     python start.py                    # default port 8000
     python start.py --port 8001        # custom port
     PORT=8001 python start.py          # or via env var
+    python start.py --setup            # interactive setup wizard
 """
 
 import argparse
@@ -19,14 +21,29 @@ import signal
 import time
 from pathlib import Path
 
+from setup import ensure_env_configured, ensure_data_dirs
+
 parser = argparse.ArgumentParser(description="VibeListen Launcher")
 parser.add_argument(
     "--port", "-p", type=int, default=int(os.getenv("PORT", "8000")),
     help="Port for the web server (default: 8000, env: PORT)",
 )
-args = parser.parse_args()
+parser.add_argument(
+    "--setup", action="store_true",
+    help="Launch interactive setup wizard instead of starting services",
+)
+args, unknown = parser.parse_known_args()
 
 PORT = args.port
+
+# If --setup flag is passed, run the interactive setup wizard and exit
+if args.setup:
+    from setup import main as setup_main
+    # Forward unrecognized args (minus --setup) to setup.py
+    forwarded = [a for a in unknown if a != "--setup"]
+    sys.argv = [sys.argv[0]] + forwarded
+    setup_main()
+    sys.exit(0)
 
 # Determine the project root (directory containing this script)
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -70,6 +87,10 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
+    # Auto-bootstrap .env and data directories before starting services
+    ensure_data_dirs()
+    ensure_env_configured(quiet=True)
+
     print(f"[Launcher] Starting VibeListen server and worker on port {PORT}...")
     print(f"[Launcher] Project root: {PROJECT_ROOT}")
 
